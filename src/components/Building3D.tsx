@@ -1,375 +1,217 @@
-import { useRef, useMemo, useEffect, useState } from 'react';
+import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Text, Float, Html, Grid, Environment, ContactShadows, Extrude } from '@react-three/drei';
+import { OrbitControls, Text, Float, Html, Grid, Environment, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import type { OSMBuilding } from '@/services/api';
+import { Parcel, Building as BuildingType, PropertyVolume } from '../types/cadastral';
+import { Box, Layers, AlertTriangle } from 'lucide-react';
 
 const FLOOR_HEIGHT = 1.2;
-const BUILDING_WIDTH = 4;
-const BUILDING_DEPTH = 3;
-const FLAT_GAP = 0.08;
+const BUILDING_WIDTH = 4.0;
+const BUILDING_DEPTH = 3.0;
 
-export interface BuildingConfig {
-  totalFloors: number;
-  floorHeightM: number;
-  footprint: number[][] | null; // normalized 2D polygon points [[x,z], ...] or null for default
-  osmLevels: number | null;
-}
-
-interface FloorProps {
+interface VolumetricPropertyProps {
+  property: PropertyVolume;
   floorIndex: number;
   isSelected: boolean;
-  isHovered: boolean;
-  onSelect: (index: number) => void;
-  onHover: (index: number | null) => void;
+  isFloorSelected: boolean;
+  onSelect: (prop: PropertyVolume) => void;
+  buildingWidth: number;
+  buildingDepth: number;
+  floorHeight: number;
 }
 
-function Floor({ floorIndex, isSelected, isHovered, onSelect, onHover }: FloorProps) {
-  const meshRef = useRef<THREE.Group>(null);
-  const flatARef = useRef<THREE.Mesh>(null);
-  const flatBRef = useRef<THREE.Mesh>(null);
+function VolumetricPropertyMesh({
+  property,
+  floorIndex,
+  isSelected,
+  isFloorSelected,
+  onSelect,
+  buildingWidth,
+  buildingDepth,
+  floorHeight,
+}: VolumetricPropertyProps) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const isFlatA = property.unitCode.endsWith('01');
+  const flatWidth = (buildingWidth - 0.15) / 2;
 
-  const yPosition = floorIndex * FLOOR_HEIGHT;
+  const xPos = isFlatA ? -(flatWidth / 2 + 0.05) : flatWidth / 2 + 0.05;
+  const yPos = floorIndex * floorHeight;
 
-  const selectedColor = new THREE.Color('#10B981');
-  const unselectedColor = new THREE.Color('#1E293B');
-  const hoveredColor = new THREE.Color('#3B82F6');
+  const targetColor = useMemo(() => {
+    if (isSelected) return new THREE.Color('#10B981'); // Emerald glow
+    if (property.isDemoWarning) return new THREE.Color('#F59E0B'); // Warning Amber
+    if (isFloorSelected) return new THREE.Color('#3B82F6'); // Active Floor Blue
+    return new THREE.Color('#1E293B'); // Normal Slate
+  }, [isSelected, property.isDemoWarning, isFloorSelected]);
 
   useFrame(() => {
-    if (!flatARef.current || !flatBRef.current) return;
-
-    const targetColor = isSelected ? selectedColor : isHovered ? hoveredColor : unselectedColor;
-    const targetOpacity = isSelected ? 0.85 : isHovered ? 0.55 : 0.35;
-    const targetEmissive = isSelected ? 0.6 : isHovered ? 0.3 : 0.05;
-
-    [flatARef.current, flatBRef.current].forEach((mesh) => {
-      const mat = mesh.material as THREE.MeshPhysicalMaterial;
-      mat.color.lerp(targetColor, 0.15);
-      mat.opacity = THREE.MathUtils.lerp(mat.opacity, targetOpacity, 0.15);
-      mat.emissive.lerp(isSelected ? selectedColor : hoveredColor, 0.1);
-      mat.emissiveIntensity = THREE.MathUtils.lerp(mat.emissiveIntensity, targetEmissive, 0.15);
-    });
-
-    if (meshRef.current) {
-      const targetY = yPosition + (isSelected ? 0.15 : 0);
-      meshRef.current.position.y = THREE.MathUtils.lerp(meshRef.current.position.y, targetY, 0.12);
-    }
+    if (!meshRef.current) return;
+    const mat = meshRef.current.material as THREE.MeshPhysicalMaterial;
+    mat.color.lerp(targetColor, 0.12);
+    const targetOpacity = isSelected ? 0.9 : isFloorSelected ? 0.6 : 0.25;
+    mat.opacity = THREE.MathUtils.lerp(mat.opacity, targetOpacity, 0.12);
+    mat.emissive.lerp(isSelected ? targetColor : new THREE.Color('#000000'), 0.1);
+    mat.emissiveIntensity = isSelected ? 0.6 : property.isDemoWarning ? 0.4 : 0.05;
   });
 
-  const flatWidth = (BUILDING_WIDTH - FLAT_GAP) / 2;
-
   return (
-    <group
-      ref={meshRef}
-      position={[0, yPosition, 0]}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect(floorIndex);
-      }}
-      onPointerOver={(e) => {
-        e.stopPropagation();
-        onHover(floorIndex);
-        document.body.style.cursor = 'pointer';
-      }}
-      onPointerOut={() => {
-        onHover(null);
-        document.body.style.cursor = 'default';
-      }}
-    >
-      <mesh ref={flatARef} position={[-(flatWidth / 2 + FLAT_GAP / 4), 0, 0]} castShadow receiveShadow>
-        <boxGeometry args={[flatWidth, FLOOR_HEIGHT * 0.82, BUILDING_DEPTH]} />
-        <meshPhysicalMaterial
-          color="#1E293B"
-          transparent
-          opacity={0.35}
-          roughness={0.05}
-          metalness={0.2}
-          transmission={0.4}
-          thickness={0.5}
-          clearcoat={1}
-          clearcoatRoughness={0.1}
-          emissive="#10B981"
-          emissiveIntensity={0.05}
-        />
-      </mesh>
-
-      <mesh ref={flatBRef} position={[flatWidth / 2 + FLAT_GAP / 4, 0, 0]} castShadow receiveShadow>
-        <boxGeometry args={[flatWidth, FLOOR_HEIGHT * 0.82, BUILDING_DEPTH]} />
-        <meshPhysicalMaterial
-          color="#1E293B"
-          transparent
-          opacity={0.35}
-          roughness={0.05}
-          metalness={0.2}
-          transmission={0.4}
-          thickness={0.5}
-          clearcoat={1}
-          clearcoatRoughness={0.1}
-          emissive="#10B981"
-          emissiveIntensity={0.05}
-        />
-      </mesh>
-
-      <mesh position={[0, -FLOOR_HEIGHT * 0.45, 0]}>
-        <boxGeometry args={[BUILDING_WIDTH + 0.15, 0.08, BUILDING_DEPTH + 0.15]} />
-        <meshStandardMaterial color="#334155" roughness={0.7} metalness={0.3} />
-      </mesh>
-
-      <Html position={[-(flatWidth / 2 + FLAT_GAP / 4), FLOOR_HEIGHT * 0.42, BUILDING_DEPTH / 2 + 0.01]} center distanceFactor={10} occlude={false}>
-        <div style={{
-          fontSize: '9px',
-          fontFamily: 'JetBrains Mono, monospace',
-          color: isSelected ? '#10B981' : '#94A3B8',
-          whiteSpace: 'nowrap',
-          background: 'rgba(15,23,42,0.7)',
-          padding: '2px 6px',
-          borderRadius: '4px',
-          border: `1px solid ${isSelected ? 'rgba(16,185,129,0.4)' : 'rgba(59,130,246,0.2)'}`,
-          textShadow: isSelected ? '0 0 8px rgba(16,185,129,0.6)' : 'none',
-        }}>
-          {`F${floorIndex + 1}-A`}
-        </div>
-      </Html>
-      <Html position={[flatWidth / 2 + FLAT_GAP / 4, FLOOR_HEIGHT * 0.42, BUILDING_DEPTH / 2 + 0.01]} center distanceFactor={10} occlude={false}>
-        <div style={{
-          fontSize: '9px',
-          fontFamily: 'JetBrains Mono, monospace',
-          color: isSelected ? '#10B981' : '#94A3B8',
-          whiteSpace: 'nowrap',
-          background: 'rgba(15,23,42,0.7)',
-          padding: '2px 6px',
-          borderRadius: '4px',
-          border: `1px solid ${isSelected ? 'rgba(16,185,129,0.4)' : 'rgba(59,130,246,0.2)'}`,
-          textShadow: isSelected ? '0 0 8px rgba(16,185,129,0.6)' : 'none',
-        }}>
-          {`F${floorIndex + 1}-B`}
-        </div>
-      </Html>
-
-      {isSelected && (
-        <mesh position={[0, 0, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[BUILDING_WIDTH * 0.62, BUILDING_WIDTH * 0.68, 32]} />
-          <meshBasicMaterial color="#10B981" transparent opacity={0.4} side={THREE.DoubleSide} />
-        </mesh>
-      )}
-    </group>
-  );
-}
-
-function FloorLabel({ floorIndex, totalFloors }: { floorIndex: number; totalFloors: number }) {
-  const yPosition = floorIndex * FLOOR_HEIGHT;
-  const labelOffset = totalFloors > 10 ? BUILDING_WIDTH / 2 + 1.5 : BUILDING_WIDTH / 2 + 1.8;
-  return (
-    <Float speed={1.5} rotationIntensity={0} floatIntensity={0.3}>
-      <Text
-        position={[labelOffset, yPosition, 0]}
-        fontSize={totalFloors > 12 ? 0.28 : 0.35}
-        color="#10B981"
-        anchorX="left"
-        anchorY="middle"
-        outlineWidth={0.015}
-        outlineColor="#0F172A"
-        outlineOpacity={0.8}
+    <group position={[xPos, yPos, 0]}>
+      <mesh
+        ref={meshRef}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect(property);
+        }}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          document.body.style.cursor = 'pointer';
+        }}
+        onPointerOut={() => {
+          document.body.style.cursor = 'default';
+        }}
+        castShadow
+        receiveShadow
       >
-        {`Floor ${floorIndex + 1}`}
-      </Text>
-    </Float>
-  );
-}
-
-function BuildingStructure({ totalFloors }: { totalFloors: number }) {
-  const buildingH = FLOOR_HEIGHT * totalFloors;
-
-  return (
-    <group position={[0, -FLOOR_HEIGHT * 0.5, 0]}>
-      <mesh position={[0, -FLOOR_HEIGHT * 0.55, 0]} receiveShadow>
-        <boxGeometry args={[BUILDING_WIDTH + 0.6, 0.2, BUILDING_DEPTH + 0.6]} />
-        <meshStandardMaterial color="#1E293B" roughness={0.8} metalness={0.2} />
-      </mesh>
-
-      {[
-        [-BUILDING_WIDTH / 2 - 0.05, -BUILDING_DEPTH / 2 - 0.05],
-        [BUILDING_WIDTH / 2 + 0.05, -BUILDING_DEPTH / 2 - 0.05],
-        [-BUILDING_WIDTH / 2 - 0.05, BUILDING_DEPTH / 2 + 0.05],
-        [BUILDING_WIDTH / 2 + 0.05, BUILDING_DEPTH / 2 + 0.05],
-      ].map(([x, z], i) => (
-        <mesh key={i} position={[x, 0, z]}>
-          <boxGeometry args={[0.1, buildingH, 0.1]} />
-          <meshStandardMaterial color="#475569" roughness={0.6} metalness={0.4} />
-        </mesh>
-      ))}
-
-      <mesh position={[0, 0, 0]}>
-        <cylinderGeometry args={[0.15, 0.15, buildingH * 0.95, 8]} />
-        <meshStandardMaterial color="#3B82F6" roughness={0.3} metalness={0.6} emissive="#3B82F6" emissiveIntensity={0.15} />
-      </mesh>
-    </group>
-  );
-}
-
-// OSM Footprint building - extruded polygon
-function OSMFootprintBuilding({
-  polygon,
-  levels,
-  totalFloors,
-  selectedFloor,
-  onSelectFloor,
-}: {
-  polygon: number[][];
-  levels: number;
-  totalFloors: number;
-  selectedFloor: number;
-  onSelectFloor: (i: number) => void;
-}) {
-  const shape = useMemo(() => {
-    const s = new THREE.Shape();
-    s.moveTo(polygon[0][0], polygon[0][1]);
-    for (let i = 1; i < polygon.length; i++) {
-      s.lineTo(polygon[i][0], polygon[i][1]);
-    }
-    s.closePath();
-    return s;
-  }, [polygon]);
-
-  const totalHeight = FLOOR_HEIGHT * totalFloors;
-  const extrudeSettings = useMemo(
-    () => ({
-      depth: totalHeight,
-      bevelEnabled: true,
-      bevelThickness: 0.05,
-      bevelSize: 0.05,
-      bevelSegments: 2,
-    }),
-    [totalHeight]
-  );
-
-  const center = useMemo(() => {
-    let cx = 0, cz = 0;
-    polygon.forEach(([x, z]) => { cx += x; cz += z; });
-    return [cx / polygon.length, cz / polygon.length] as [number, number];
-  }, [polygon]);
-
-  const groupRef = useRef<THREE.Group>(null);
-
-  // Floor highlight strips
-  const floorStrips = useMemo(() => {
-    const strips: Array<{ y: number; index: number }> = [];
-    for (let i = 0; i < totalFloors; i++) {
-      strips.push({ y: i * FLOOR_HEIGHT + FLOOR_HEIGHT / 2, index: i });
-    }
-    return strips;
-  }, [totalFloors]);
-
-  return (
-    <group ref={groupRef} position={[-center[0], -totalFloors * FLOOR_HEIGHT * 0.5 + FLOOR_HEIGHT, -center[1]]}>
-      {/* Main extruded building */}
-      <Extrude args={[shape, extrudeSettings]} position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <boxGeometry args={[flatWidth, floorHeight * 0.85, buildingDepth]} />
         <meshPhysicalMaterial
           color="#1E293B"
           transparent
-          opacity={0.25}
-          roughness={0.05}
-          metalness={0.3}
-          transmission={0.5}
+          opacity={0.3}
+          roughness={0.1}
+          metalness={0.2}
+          transmission={0.4}
           thickness={0.5}
           clearcoat={1}
           clearcoatRoughness={0.1}
-          emissive="#3B82F6"
-          emissiveIntensity={0.08}
         />
-      </Extrude>
+      </mesh>
 
-      {/* Floor separator lines and highlight strips */}
-      {floorStrips.map((strip) => {
-        const isSelected = selectedFloor === strip.index;
-        return (
-          <mesh
-            key={strip.index}
-            position={[0, strip.y, 0.01]}
-            onClick={(e) => { e.stopPropagation(); onSelectFloor(strip.index); }}
-            onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
-            onPointerOut={() => { document.body.style.cursor = 'default'; }}
-          >
-            <boxGeometry args={[0.02, FLOOR_HEIGHT * 0.9, 0.02]} />
-            <meshBasicMaterial color={isSelected ? '#10B981' : '#475569'} />
-          </mesh>
-        );
-      })}
-
-      {/* OSM Info label */}
-      <Html position={[0, totalHeight + 0.5, 0]} center distanceFactor={12}>
-        <div style={{
-          fontSize: '10px',
-          fontFamily: 'JetBrains Mono, monospace',
-          color: '#10B981',
-          whiteSpace: 'nowrap',
-          background: 'rgba(15,23,42,0.85)',
-          padding: '4px 10px',
-          borderRadius: '6px',
-          border: '1px solid rgba(16,185,129,0.4)',
-          textShadow: '0 0 8px rgba(16,185,129,0.5)',
-        }}>
-          {`OSM Footprint · ${levels || totalFloors} levels · ${totalFloors}F mesh`}
+      {/* Volumetric Label */}
+      <Html position={[0, floorHeight * 0.45, buildingDepth / 2 + 0.01]} center distanceFactor={10} occlude={false}>
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(property);
+          }}
+          style={{
+            fontSize: '9px',
+            fontFamily: 'JetBrains Mono, monospace',
+            color: isSelected ? '#10B981' : property.isDemoWarning ? '#F59E0B' : '#94A3B8',
+            whiteSpace: 'nowrap',
+            background: 'rgba(15,23,42,0.85)',
+            padding: '2px 6px',
+            borderRadius: '4px',
+            border: `1px solid ${isSelected ? 'rgba(16,185,129,0.5)' : 'rgba(59,130,246,0.2)'}`,
+            cursor: 'pointer',
+          }}
+        >
+          {property.flatNumber} ({property.areaSqFt} sqft)
         </div>
       </Html>
     </group>
   );
 }
 
-function RoamingLight() {
-  const lightRef = useRef<THREE.PointLight>(null);
-
-  useFrame(({ clock }) => {
-    if (lightRef.current) {
-      const t = clock.getElapsedTime() * 0.5;
-      lightRef.current.position.x = Math.sin(t) * 5;
-      lightRef.current.position.z = Math.cos(t) * 5;
-    }
-  });
-
-  return <pointLight ref={lightRef} position={[5, 4, 5]} intensity={0.6} color="#10B981" distance={15} />;
+interface UndergroundPipeMeshProps {
+  assetId: string;
+  name: string;
+  type: string;
+  depthM: number;
+  color: string;
+  position: [number, number, number];
+  rotation: [number, number, number];
 }
 
-interface Building3DProps {
-  selectedFloor: number;
-  hoveredFloor: number | null;
-  onSelectFloor: (index: number) => void;
-  onHoverFloor: (index: number | null) => void;
-  focusTrigger: number;
-  config: BuildingConfig;
+function SubterraneanAssetMesh({ name, depthM, color, position, rotation }: UndergroundPipeMeshProps) {
+  return (
+    <group position={position} rotation={rotation}>
+      <mesh castShadow receiveShadow>
+        <cylinderGeometry args={[0.2, 0.2, 8, 16]} />
+        <meshStandardMaterial color={color} roughness={0.3} metalness={0.7} emissive={color} emissiveIntensity={0.2} />
+      </mesh>
+      <Html position={[0, 0.4, 0]} center distanceFactor={12}>
+        <div
+          style={{
+            fontSize: '8px',
+            fontFamily: 'JetBrains Mono, monospace',
+            color,
+            background: 'rgba(15,23,42,0.9)',
+            padding: '2px 5px',
+            borderRadius: '4px',
+            border: `1px solid ${color}`,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {name} (Z = -{depthM}m)
+        </div>
+      </Html>
+    </group>
+  );
 }
 
-function BuildingScene({
-  selectedFloor,
-  hoveredFloor,
+interface SceneProps {
+  parcel: Parcel;
+  building: BuildingType;
+  selectedFloorNumber: number;
+  selectedPropertyId: string | null;
+  onSelectFloor: (floorNo: number) => void;
+  onSelectProperty: (prop: PropertyVolume) => void;
+  isUndergroundView: boolean;
+}
+
+function MainBuildingScene({
+  parcel,
+  building,
+  selectedFloorNumber,
+  selectedPropertyId,
   onSelectFloor,
-  onHoverFloor,
-  focusTrigger,
-  config,
-}: Building3DProps) {
+  onSelectProperty,
+  isUndergroundView,
+}: SceneProps) {
   const { camera } = useThree();
   const controlsRef = useRef<any>(null);
   const targetPosRef = useRef(new THREE.Vector3(7, 3, 8));
   const targetLookRef = useRef(new THREE.Vector3(0, 0, 0));
   const animatingRef = useRef(false);
-  const [displayFloors, setDisplayFloors] = useState(config.totalFloors);
 
-  // Smoothly transition floor count
+  const bWidth = useMemo(() => {
+    if (building.footprintPolygon && building.footprintPolygon.length > 0) {
+      let minX = Infinity, maxX = -Infinity;
+      building.footprintPolygon.forEach(pt => {
+        if (pt[0] < minX) minX = pt[0];
+        if (pt[0] > maxX) maxX = pt[0];
+      });
+      return Math.max((maxX - minX) * 2, 2.0);
+    }
+    return 4.0;
+  }, [building]);
+
+  const bDepth = useMemo(() => {
+    if (building.footprintPolygon && building.footprintPolygon.length > 0) {
+      let minZ = Infinity, maxZ = -Infinity;
+      building.footprintPolygon.forEach(pt => {
+        if (pt[1] < minZ) minZ = pt[1];
+        if (pt[1] > maxZ) maxZ = pt[1];
+      });
+      return Math.max((maxZ - minZ) * 2, 2.0);
+    }
+    return 3.0;
+  }, [building]);
+
+  const fHeight = useMemo(() => {
+    return building.floorHeightM ? building.floorHeightM * 0.35 : 1.2;
+  }, [building]);
+
+  const parcelSize = useMemo(() => Math.sqrt(parcel.areaSqM || 100) * 0.3, [parcel]);
+
+  const offsetY = -building.floors.length * fHeight * 0.5 + fHeight;
+
   useEffect(() => {
-    setDisplayFloors(config.totalFloors);
-  }, [config.totalFloors]);
-
-  const floors = useMemo(() => Array.from({ length: displayFloors }, (_, i) => i), [displayFloors]);
-  const offsetY = -displayFloors * FLOOR_HEIGHT * 0.5 + FLOOR_HEIGHT;
-
-  useEffect(() => {
-    if (focusTrigger === 0) return;
-    const floorY = (selectedFloor - Math.floor(displayFloors / 2)) * FLOOR_HEIGHT;
-    const dist = displayFloors > 10 ? 10 : 7;
-    targetPosRef.current.set(dist, floorY + 2, dist - 1);
-    targetLookRef.current.set(0, floorY, 0);
+    const floorY = (selectedFloorNumber - Math.floor(building.floors.length / 2)) * fHeight;
+    targetPosRef.current.set(bWidth * 1.5, isUndergroundView ? -4 : floorY + 2, bDepth * 1.5 + 2);
+    targetLookRef.current.set(0, isUndergroundView ? -3 : floorY, 0);
     animatingRef.current = true;
-  }, [focusTrigger, selectedFloor, displayFloors]);
+  }, [selectedFloorNumber, isUndergroundView, building.floors.length, fHeight, bWidth, bDepth]);
 
   useFrame(() => {
     if (!animatingRef.current) return;
@@ -383,52 +225,137 @@ function BuildingScene({
     }
   });
 
-  const hasOSM = config.footprint !== null && config.footprint !== undefined;
-
   return (
     <>
-      <ambientLight intensity={0.35} />
-      <directionalLight
-        position={[8, 12, 6]}
-        intensity={0.8}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-      />
-      <pointLight position={[-6, 4, -4]} intensity={0.4} color="#3B82F6" />
-      <RoamingLight />
+      <ambientLight intensity={0.4} />
+      <directionalLight position={[8, 12, 6]} intensity={0.9} castShadow />
+      <pointLight position={[-6, 4, -4]} intensity={0.5} color="#3B82F6" />
 
-      <group position={[0, offsetY, 0]}>
-        {hasOSM ? (
-          <OSMFootprintBuilding
-            polygon={config.footprint!}
-            levels={config.osmLevels || 0}
-            totalFloors={displayFloors}
-            selectedFloor={selectedFloor}
-            onSelectFloor={onSelectFloor}
+      {/* 2D Land Parcel Outline Box on Ground Plane */}
+      <group position={[0, offsetY - fHeight * 0.5, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+          <planeGeometry args={[parcelSize, parcelSize]} />
+          <meshStandardMaterial
+            color="#0F172A"
+            transparent
+            opacity={isUndergroundView ? 0.2 : 0.8}
+            roughness={0.9}
           />
-        ) : (
-          <>
-            {floors.map((i) => (
-              <Floor
-                key={i}
-                floorIndex={i}
-                isSelected={selectedFloor === i}
-                isHovered={hoveredFloor === i}
-                onSelect={onSelectFloor}
-                onHover={onHoverFloor}
-              />
-            ))}
-            <BuildingStructure totalFloors={displayFloors} />
-          </>
-        )}
+        </mesh>
+        {/* Parcel Boundary Border Outline */}
+        <lineLoop position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <bufferGeometry>
+            <bufferAttribute
+              attach="attributes-position"
+              args={[new Float32Array([
+                -parcelSize/2, -parcelSize/2, 0,
+                parcelSize/2, -parcelSize/2, 0,
+                parcelSize/2, parcelSize/2, 0,
+                -parcelSize/2, parcelSize/2, 0
+              ]), 3]}
+            />
+          </bufferGeometry>
+          <lineBasicMaterial color="#10B981" linewidth={2} />
+        </lineLoop>
 
-        {floors.map((i) => (
-          <FloorLabel key={`label-${i}`} floorIndex={i} totalFloors={displayFloors} />
-        ))}
+        <Html position={[-parcelSize/2 + 0.5, 0.2, -parcelSize/2 + 0.8]} center distanceFactor={12}>
+          <div style={{ fontSize: '9px', fontFamily: 'monospace', color: '#10B981', background: 'rgba(15,23,42,0.8)', padding: '2px 6px', borderRadius: '4px' }}>
+            Parcel Boundary {parcel.surveyNumber} ({parcel.areaSqM} m²)
+          </div>
+        </Html>
       </group>
 
+      {/* 3D Volumetric Building Floors */}
+      <group position={[0, offsetY, 0]}>
+        {building.floors.map((floor, fIdx) => {
+          const isFloorSelected = selectedFloorNumber === floor.floorNumber;
+          const yPos = fIdx * fHeight;
+
+          return (
+            <group key={floor.floorNumber}>
+              {/* Floor Slab Separator */}
+              <mesh position={[0, yPos - fHeight * 0.45, 0]}>
+                <boxGeometry args={[bWidth + 0.15, 0.08, bDepth + 0.15]} />
+                <meshStandardMaterial color={isFloorSelected ? '#10B981' : '#334155'} roughness={0.7} />
+              </mesh>
+
+              {/* Properties on Floor */}
+              {floor.properties.map((prop) => (
+                <VolumetricPropertyMesh
+                  key={prop.id}
+                  property={prop}
+                  floorIndex={fIdx}
+                  isSelected={selectedPropertyId === prop.id}
+                  isFloorSelected={isFloorSelected}
+                  onSelect={(p) => {
+                    onSelectFloor(floor.floorNumber);
+                    onSelectProperty(p);
+                  }}
+                  buildingWidth={bWidth}
+                  buildingDepth={bDepth}
+                  floorHeight={fHeight}
+                />
+              ))}
+
+              {/* Floor Label */}
+              <Float speed={1.5} rotationIntensity={0} floatIntensity={0.2}>
+                <Text
+                  position={[bWidth / 2 + 1.2, yPos, 0]}
+                  fontSize={0.32}
+                  color={isFloorSelected ? '#10B981' : '#64748B'}
+                  anchorX="left"
+                  anchorY="middle"
+                  onClick={() => onSelectFloor(floor.floorNumber)}
+                >
+                  {`Floor ${floor.floorNumber}`}
+                </Text>
+              </Float>
+            </group>
+          );
+        })}
+      </group>
+
+      {/* Subterranean Underground Assets Layer */}
+      {isUndergroundView && (
+        <group position={[0, offsetY - FLOOR_HEIGHT * 0.5, 0]}>
+          <SubterraneanAssetMesh
+            assetId="PIPE-W-102"
+            name="Municipal Water Main"
+            type="Water Pipeline"
+            depthM={3.5}
+            color="#3B82F6"
+            position={[0, -1.2, 0]}
+            rotation={[0, 0, Math.PI / 2]}
+          />
+          <SubterraneanAssetMesh
+            assetId="SEW-401"
+            name="Sewer Trunk Line"
+            type="Sewer Line"
+            depthM={5.0}
+            color="#F59E0B"
+            position={[0, -2.0, 1.2]}
+            rotation={[0, 0, Math.PI / 2]}
+          />
+          <SubterraneanAssetMesh
+            assetId="FIBER-C-09"
+            name="Fiber Optic Cable"
+            type="Fiber Optic Cable"
+            depthM={1.8}
+            color="#10B981"
+            position={[0, -0.6, -1.2]}
+            rotation={[0, 0, Math.PI / 2]}
+          />
+
+          {/* Subterranean Basement Parking Vault */}
+          <mesh position={[0, -1.5, 0]}>
+            <boxGeometry args={[3.8, 1.2, 2.8]} />
+            <meshStandardMaterial color="#475569" transparent opacity={0.3} wireframe />
+          </mesh>
+        </group>
+      )}
+
       <Grid
-        position={[0, offsetY - FLOOR_HEIGHT * 0.7, 0]}
+        position={[0, offsetY - FLOOR_HEIGHT * 0.52, 0]}
         args={[30, 30]}
         cellSize={1}
         cellThickness={0.5}
@@ -441,15 +368,7 @@ function BuildingScene({
         infiniteGrid
       />
 
-      <ContactShadows
-        position={[0, offsetY - FLOOR_HEIGHT * 0.6, 0]}
-        opacity={0.4}
-        scale={15}
-        blur={2.5}
-        far={8}
-        color="#10B981"
-      />
-
+      <ContactShadows position={[0, offsetY - FLOOR_HEIGHT * 0.5, 0]} opacity={0.4} scale={15} blur={2.5} far={8} color="#10B981" />
       <Environment preset="night" />
 
       <OrbitControls
@@ -457,26 +376,204 @@ function BuildingScene({
         enablePan
         enableZoom
         enableRotate
-        minDistance={4}
+        minDistance={3}
         maxDistance={25}
-        maxPolarAngle={Math.PI / 2.1}
-        autoRotate
-        autoRotateSpeed={0.3}
+        maxPolarAngle={isUndergroundView ? Math.PI : Math.PI / 2.05}
         target={[0, 0, 0]}
       />
     </>
   );
 }
 
-export default function Building3D(props: Building3DProps) {
+function ConceptualFloorPlan2D({
+  building,
+  selectedFloorNumber,
+  selectedPropertyId,
+  onSelectProperty,
+}: {
+  building: BuildingType;
+  selectedFloorNumber: number;
+  selectedPropertyId: string | null;
+  onSelectProperty: (prop: PropertyVolume) => void;
+}) {
+  const floor = building.floors.find((f) => f.floorNumber === selectedFloorNumber) || building.floors[0];
+  
+  if (!floor) return null;
+
+  // Calculate bounding box for SVG viewbox
+  let minX = 0, maxX = 0, minY = 0, maxY = 0;
+  floor.properties.forEach(p => {
+    minX = Math.min(minX, p.xRangeM[0]);
+    maxX = Math.max(maxX, p.xRangeM[1]);
+    minY = Math.min(minY, p.yRangeM[0]);
+    maxY = Math.max(maxY, p.yRangeM[1]);
+  });
+  
+  // Add padding
+  const padding = 1;
+  minX -= padding;
+  maxX += padding;
+  minY -= padding;
+  maxY += padding;
+  
+  const width = maxX - minX;
+  const height = maxY - minY;
+
   return (
-    <Canvas
-      shadows
-      camera={{ position: [7, 3, 8], fov: 45 }}
-      gl={{ antialias: true, alpha: true }}
-      dpr={[1, 2]}
-    >
-      <BuildingScene {...props} />
-    </Canvas>
+    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 p-8">
+      <div className="flex items-center gap-2 mb-6 border border-amber-500/30 bg-amber-500/10 px-4 py-2 rounded text-amber-500 font-mono text-xs shadow-lg">
+        <AlertTriangle className="w-4 h-4" />
+        <span>CONCEPTUAL FLOOR PLAN: This is synthetic prototype data, not an actual surveyed architectural plan.</span>
+      </div>
+      
+      <div className="relative w-full max-w-2xl aspect-square bg-slate-900 border border-slate-700 shadow-2xl rounded-xl p-8 flex items-center justify-center overflow-hidden">
+        
+        {/* Subtle grid background */}
+        <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#3B82F6 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
+        
+        <svg viewBox={`${minX} ${minY} ${width} ${height}`} className="w-full h-full drop-shadow-2xl">
+          <defs>
+            <pattern id="hatch" width="0.2" height="0.2" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+              <line x1="0" y1="0" x2="0" y2="0.2" stroke="#334155" strokeWidth="0.05" />
+            </pattern>
+          </defs>
+          
+          {/* Building Outer Bounds Outline */}
+          <rect 
+            x={minX + padding - 0.2} 
+            y={minY + padding - 0.2} 
+            width={width - padding*2 + 0.4} 
+            height={height - padding*2 + 0.4} 
+            fill="url(#hatch)" 
+            stroke="#475569" 
+            strokeWidth="0.05"
+            rx="0.1"
+          />
+
+          {floor.properties.map((prop) => {
+            const isSelected = prop.id === selectedPropertyId;
+            const w = prop.xRangeM[1] - prop.xRangeM[0];
+            const h = prop.yRangeM[1] - prop.yRangeM[0];
+            return (
+              <g 
+                key={prop.id} 
+                className="cursor-pointer transition-all duration-300"
+                onClick={() => onSelectProperty(prop)}
+              >
+                <rect
+                  x={prop.xRangeM[0]}
+                  y={prop.yRangeM[0]}
+                  width={w}
+                  height={h}
+                  fill={isSelected ? '#10B981' : '#1E293B'}
+                  stroke={isSelected ? '#34D399' : '#64748B'}
+                  strokeWidth="0.05"
+                  className="transition-all duration-300 hover:opacity-80"
+                  rx="0.05"
+                />
+                <text 
+                  x={prop.xRangeM[0] + w/2} 
+                  y={prop.yRangeM[0] + h/2} 
+                  textAnchor="middle" 
+                  dominantBaseline="central"
+                  fontSize="0.2"
+                  fill={isSelected ? '#064E3B' : '#CBD5E1'}
+                  fontFamily="monospace"
+                  fontWeight="bold"
+                >
+                  {prop.unitCode}
+                </text>
+                <text 
+                  x={prop.xRangeM[0] + w/2} 
+                  y={prop.yRangeM[0] + h/2 + 0.25} 
+                  textAnchor="middle" 
+                  dominantBaseline="central"
+                  fontSize="0.12"
+                  fill={isSelected ? '#064E3B' : '#94A3B8'}
+                  fontFamily="monospace"
+                >
+                  {prop.areaSqFt} sqft
+                </text>
+                {prop.isDemoWarning && (
+                  <text
+                     x={prop.xRangeM[0] + 0.1}
+                     y={prop.yRangeM[0] + 0.2}
+                     fontSize="0.15"
+                     fill="#F59E0B"
+                  >
+                    ⚠️
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+
+        <div className="absolute bottom-4 left-4 font-mono text-[10px] text-slate-500">
+          Scale: Synthetic Relative Offsets
+        </div>
+        <div className="absolute top-4 right-4 bg-slate-800/80 px-3 py-1.5 rounded border border-slate-700 font-bold text-xs text-white shadow-lg">
+          Floor {floor.floorNumber}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export interface Building3DProps {
+  parcel: Parcel;
+  building: BuildingType;
+  selectedFloorNumber: number;
+  selectedPropertyId: string | null;
+  onSelectFloor: (floorNo: number) => void;
+  onSelectProperty: (prop: PropertyVolume) => void;
+  isUndergroundView?: boolean;
+}
+
+export default function Building3D(props: Building3DProps) {
+  const [viewMode, setViewMode] = useState<'3D' | '2D'>('3D');
+
+  return (
+    <div className="relative w-full h-full bg-slate-950">
+      
+      {/* Top Toggle Controls */}
+      <div className="absolute top-4 right-4 z-20 flex gap-1 bg-slate-900/80 p-1 rounded-lg border border-slate-700/50 shadow-xl backdrop-blur-md">
+        <button
+          onClick={() => setViewMode('3D')}
+          className={`flex items-center gap-2 px-4 py-2 rounded text-xs font-bold transition-all ${
+            viewMode === '3D' 
+              ? 'bg-emerald text-slate-900 glow-emerald shadow-lg scale-[1.02]' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Box className="w-4 h-4" />
+          3D VOLUME
+        </button>
+        <button
+          onClick={() => setViewMode('2D')}
+          className={`flex items-center gap-2 px-4 py-2 rounded text-xs font-bold transition-all ${
+            viewMode === '2D' 
+              ? 'bg-emerald text-slate-900 glow-emerald shadow-lg scale-[1.02]' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          2D FLOOR PLAN
+        </button>
+      </div>
+
+      {viewMode === '3D' ? (
+        <Canvas shadows camera={{ position: [7, 3, 8], fov: 45 }} gl={{ antialias: true, alpha: true }} dpr={[1, 2]}>
+          <MainBuildingScene {...props} isUndergroundView={props.isUndergroundView || false} />
+        </Canvas>
+      ) : (
+        <ConceptualFloorPlan2D 
+          building={props.building} 
+          selectedFloorNumber={props.selectedFloorNumber} 
+          selectedPropertyId={props.selectedPropertyId} 
+          onSelectProperty={props.onSelectProperty} 
+        />
+      )}
+    </div>
   );
 }

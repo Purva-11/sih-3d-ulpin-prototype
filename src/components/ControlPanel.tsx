@@ -1,39 +1,46 @@
+import React, { useState } from 'react';
 import {
-  MapPin,
-  Building,
-  Hash,
   Layers,
   Home,
   QrCode,
-  Loader2,
   Copy,
   Check,
   User,
-  Receipt,
-  FileCheck,
-  Globe2,
-  Ruler,
-  Mountain,
-  Calendar,
+  Box,
+  Building,
+  MapPin,
+  ShieldAlert,
+  Database,
+  Info
 } from 'lucide-react';
-import type { ULPINResponse } from '@/services/api';
+import { Parcel, Building as BuildingType, PropertyVolume, VolumetricProperty } from '../types/cadastral';
+import { generateVolumetricProperty } from '../services/api';
+
+function generateDeterministicOwner(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = ((hash << 5) - hash) + id.charCodeAt(i);
+    hash |= 0;
+  }
+  const names = ['Rajesh Sharma', 'Amit Verma', 'Sanjay Gupta', 'Priya Patil', 'Neha Deshmukh', 'Vikram Singh', 'Anita Reddy', 'Rahul Joshi', 'Sunil Kumar', 'Meera Iyer'];
+  const types = ['Individual', 'Joint', 'Corporate', 'HUF'];
+  
+  return {
+    name: names[Math.abs(hash) % names.length],
+    type: types[Math.abs(hash) % types.length],
+    contact: 'DEMO RECORD'
+  };
+}
 
 interface ControlPanelProps {
-  state: string;
-  setState: (v: string) => void;
-  district: string;
-  setDistrict: (v: string) => void;
-  surveyPlotNo: string;
-  setSurveyPlotNo: (v: string) => void;
-  floorLevel: number;
-  setFloorLevel: (v: number) => void;
-  flatUnit: string;
-  setFlatUnit: (v: string) => void;
-  onGenerate: () => void;
-  loading: boolean;
-  result: ULPINResponse | null;
-  copied: boolean;
-  onCopy: () => void;
+  parcels: Parcel[];
+  selectedParcel: Parcel;
+  selectedBuilding: BuildingType;
+  selectedFloorNumber: number;
+  selectedProperty: PropertyVolume | null;
+  onSelectFloor: (floorNo: number) => void;
+  onSelectProperty: (property: PropertyVolume) => void;
+  onUpdateParcel: (updated: Partial<Parcel>) => void;
 }
 
 const STATES = [
@@ -41,8 +48,6 @@ const STATES = [
   { code: 'DL', label: 'Delhi - DL' },
   { code: 'KA', label: 'Karnataka - KA' },
   { code: 'TN', label: 'Tamil Nadu - TN' },
-  { code: 'RJ', label: 'Rajasthan - RJ' },
-  { code: 'UP', label: 'Uttar Pradesh - UP' },
 ];
 
 const DISTRICTS: Record<string, { code: string; label: string }[]> = {
@@ -61,312 +66,360 @@ const DISTRICTS: Record<string, { code: string; label: string }[]> = {
   ],
   TN: [
     { code: 'CEN', label: 'Chennai - CEN' },
-    { code: 'COI', label: 'Coimbatore - COI' },
-  ],
-  RJ: [
-    { code: 'JPR', label: 'Jaipur - JPR' },
-    { code: 'JOD', label: 'Jodhpur - JOD' },
-  ],
-  UP: [
-    { code: 'LKO', label: 'Lucknow - LKO' },
-    { code: 'NOI', label: 'Noida - NOI' },
   ],
 };
 
-const FLAT_OPTIONS = ['Flat 401', 'Flat 402'];
+export default function ControlPanel({
+  parcels,
+  selectedParcel,
+  selectedBuilding,
+  selectedFloorNumber,
+  selectedProperty,
+  onSelectFloor,
+  onSelectProperty,
+  onUpdateParcel,
+}: ControlPanelProps) {
+  const [copied, setCopied] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedProperty, setGeneratedProperty] = useState<VolumetricProperty | null>(null);
 
-function SelectField({
-  icon: Icon,
-  label,
-  value,
-  onChange,
-  children,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 flex items-center gap-1.5">
-        <Icon className="w-3.5 h-3.5 text-cyber" />
-        {label}
-      </label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-2.5 text-sm rounded-lg glass border border-cyber/20 text-slate-200 focus:outline-none focus:border-emerald/50 focus:ring-1 focus:ring-emerald/30 transition-all cursor-pointer"
-      >
-        {children}
-      </select>
-    </div>
-  );
-}
+  // Single source of truth active floor & active property
+  const activeFloor =
+    selectedBuilding.floors.find((f) => f.floorNumber === selectedFloorNumber) ||
+    selectedBuilding.floors[0];
 
-function InputField({
-  icon: Icon,
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <div>
-      <label className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 flex items-center gap-1.5">
-        <Icon className="w-3.5 h-3.5 text-cyber" />
-        {label}
-      </label>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full px-3 py-2.5 text-sm rounded-lg glass border border-cyber/20 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-emerald/50 focus:ring-1 focus:ring-emerald/30 transition-all font-mono"
-      />
-    </div>
-  );
-}
+  const activeProperty =
+    (selectedProperty && selectedProperty.floorNumber === selectedFloorNumber
+      ? selectedProperty
+      : activeFloor.properties[1] || activeFloor.properties[0]) || activeFloor.properties[0];
 
-function MetaRow({
-  icon: Icon,
-  label,
-  value,
-  unit,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string | number;
-  unit?: string;
-}) {
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-slate-700/40 last:border-0">
-      <div className="flex items-center gap-2">
-        <Icon className="w-3.5 h-3.5 text-cyber" />
-        <span className="text-xs text-slate-400">{label}</span>
-      </div>
-      <span className="text-xs font-mono text-slate-200 font-medium">
-        {value}
-        {unit && <span className="text-slate-500 ml-1">{unit}</span>}
-      </span>
-    </div>
-  );
-}
+  const handleCopy = () => {
+    if (generatedProperty) {
+      navigator.clipboard.writeText(generatedProperty.prototype3DId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
-export default function ControlPanel(props: ControlPanelProps) {
-  const {
-    state,
-    setState,
-    district,
-    setDistrict,
-    surveyPlotNo,
-    setSurveyPlotNo,
-    floorLevel,
-    setFloorLevel,
-    flatUnit,
-    setFlatUnit,
-    onGenerate,
-    loading,
-    result,
-    copied,
-    onCopy,
-  } = props;
+  const handleGenerate = async () => {
+    if (!activeProperty) return;
+    setIsGenerating(true);
+    try {
+      const response = await generateVolumetricProperty({
+        localityCode: `${selectedParcel.stateCode}-${selectedParcel.districtCode}`,
+        parcelId: selectedParcel.surveyNumber || selectedParcel.id,
+        buildingId: selectedBuilding.id,
+        floorId: `F${activeProperty.floorNumber}`,
+        propertyId: activeProperty.flatNumber || activeProperty.id,
+        floorNumber: activeProperty.floorNumber,
+        zMinM: activeProperty.bottomElevationM,
+        zMaxM: activeProperty.topElevationM,
+        footprintAreaM2: activeProperty.areaSqM
+      });
+      setGeneratedProperty(response as any);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
-  const districtOptions = DISTRICTS[state] || DISTRICTS.MH;
+  // Reset generated property when selecting a different one
+  React.useEffect(() => {
+    setGeneratedProperty(null);
+  }, [activeProperty.id]);
+
+  const buildingOwner = React.useMemo(() => generateDeterministicOwner(selectedBuilding.id), [selectedBuilding.id]);
+  const propertyOwner = React.useMemo(() => generateDeterministicOwner(activeProperty.id), [activeProperty.id]);
+  const buildingBuiltUpArea = React.useMemo(() => {
+    let area = 0;
+    selectedBuilding.floors.forEach(f => {
+      f.properties.forEach(p => area += p.areaSqM);
+    });
+    return area;
+  }, [selectedBuilding]);
 
   return (
-    <div className="flex flex-col gap-4 h-full overflow-y-auto p-4">
-      {/* Form Card */}
-      <div className="glass rounded-2xl p-5 border border-cyber/15">
-        <div className="flex items-center gap-2 mb-4">
-          <div className="w-8 h-8 rounded-lg bg-cyber/15 flex items-center justify-center">
-            <QrCode className="w-4 h-4 text-cyber" />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold text-white">3D-ULPIN Generator</h2>
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Property Registration Module</p>
-          </div>
+    <div className="flex flex-col gap-4 h-full overflow-y-auto p-4 glass-strong border-l border-cyber/15 custom-scrollbar">
+      
+      {/* BUILDING INFORMATION */}
+      <div className="glass rounded-2xl p-5 border border-slate-700/50 space-y-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Building className="w-4 h-4 text-emerald" />
+          <h3 className="text-xs font-bold text-white uppercase tracking-wider font-mono">Building Information</h3>
         </div>
-
-        <div className="space-y-3.5">
-          <SelectField icon={MapPin} label="State" value={state} onChange={setState}>
-            {STATES.map((s) => (
-              <option key={s.code} value={s.code}>{s.label}</option>
-            ))}
-          </SelectField>
-
-          <SelectField icon={Building} label="District" value={district} onChange={setDistrict}>
-            {districtOptions.map((d) => (
-              <option key={d.code} value={d.code}>{d.label}</option>
-            ))}
-          </SelectField>
-
-          <InputField icon={Hash} label="Survey Plot No." value={surveyPlotNo} onChange={setSurveyPlotNo} placeholder="402/A" />
-
-          {/* Floor slider */}
-          <div>
-            <label className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-cyber" />
-              Floor Level
-              <span className="ml-auto text-emerald font-mono text-sm normal-case tracking-normal">Level {floorLevel}</span>
-            </label>
-            <input
-              type="range"
-              min={1}
-              max={5}
-              value={floorLevel}
-              onChange={(e) => setFloorLevel(Number(e.target.value))}
-              className="w-full cursor-pointer"
-            />
-            <div className="flex justify-between mt-1">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <span key={n} className={`text-[10px] font-mono ${n === floorLevel ? 'text-emerald font-bold' : 'text-slate-600'}`}>
-                  F{n}
-                </span>
-              ))}
+        <div className="space-y-1.5 text-[11px] font-mono">
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Building Name:</span>
+            <span className="text-slate-200 font-bold text-right">{selectedBuilding.name}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Building ID:</span>
+            <span className="text-slate-200 font-bold">{selectedBuilding.id}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Template ID:</span>
+            <span className="text-slate-200">Demo Building Template</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Building Type:</span>
+            <span className="text-slate-200">{selectedBuilding.name.includes('COMMERCIAL') ? 'Commercial' : selectedBuilding.name.includes('APARTMENT') ? 'Apartment' : 'Residential'}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Number of Floors:</span>
+            <span className="text-slate-200 font-bold">{selectedBuilding.totalFloors}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Total Height:</span>
+            <span className="text-slate-200">{selectedBuilding.totalHeightM.toFixed(2)} m</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Built-up Area:</span>
+            <span className="text-slate-200">{buildingBuiltUpArea.toFixed(1)} m²</span>
+          </div>
+          
+          {/* Building Owner */}
+          <div className="mt-3 p-3 rounded-xl bg-slate-900/80 border border-slate-700/50">
+            <span className="text-[10px] text-slate-500 uppercase block mb-1">Primary Property Holder</span>
+            <div className="flex items-center gap-2 mb-1">
+              <User className="w-3.5 h-3.5 text-amber-500" />
+              <span className="text-xs font-bold text-white">{buildingOwner.name}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-slate-400">Type: {buildingOwner.type}</span>
+              <span className="text-amber-500 font-bold px-1.5 rounded bg-amber-500/10">SYNTHETIC DATA</span>
             </div>
           </div>
-
-          {/* Flat unit */}
-          <div>
-            <label className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 flex items-center gap-1.5">
-              <Home className="w-3.5 h-3.5 text-cyber" />
-              Flat Unit
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {FLAT_OPTIONS.map((opt) => {
-                const isActive = flatUnit === opt;
-                return (
-                  <button
-                    key={opt}
-                    onClick={() => setFlatUnit(opt)}
-                    className={`px-3 py-2.5 text-sm rounded-lg border transition-all ${
-                      isActive
-                        ? 'bg-emerald/15 border-emerald/50 text-emerald font-semibold glow-emerald'
-                        : 'glass border-cyber/15 text-slate-400 hover:border-cyber/30 hover:text-slate-300'
-                    }`}
-                  >
-                    {opt}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Generate button */}
-          <button
-            onClick={onGenerate}
-            disabled={loading}
-            className="w-full mt-2 py-3 rounded-xl bg-gradient-to-r from-emerald to-cyber text-slate-950 font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed glow-emerald"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin-slow" />
-                Generating 3D-ULPIN...
-              </>
-            ) : (
-              <>
-                <QrCode className="w-4 h-4" />
-                Generate 3D-ULPIN & Register Property
-              </>
-            )}
-          </button>
         </div>
       </div>
 
-      {/* Output Card */}
-      {result && (
-        <div className="glass-strong rounded-2xl p-5 border border-emerald/25 animate-slide-in glow-emerald">
-          {/* ULPIN Badge */}
-          <div className="text-center mb-4">
-            <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">Generated 3D-ULPIN Code</p>
-            <div className="relative inline-block">
-              <div className="px-5 py-3 rounded-xl bg-slate-950/80 border-2 border-emerald/40 animate-pulse-glow">
-                <span className="text-xl font-mono font-bold text-emerald text-glow tracking-wider break-all">
-                  {result.ulpin}
-                </span>
-              </div>
+      {/* LOCATION & SPATIAL */}
+      <div className="glass rounded-2xl p-5 border border-slate-700/50 space-y-3">
+        <div className="flex items-center gap-2 mb-2">
+          <MapPin className="w-4 h-4 text-cyan-400" />
+          <h3 className="text-xs font-bold text-white uppercase tracking-wider font-mono">Location Information</h3>
+        </div>
+        <div className="space-y-1.5 text-[11px] font-mono">
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Parent Parcel ID:</span>
+            <span className="text-cyan-400 font-bold">{selectedParcel.id}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Survey / Plot No:</span>
+            <span className="text-slate-200">{selectedParcel.surveyNumber || 'N/A'}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Latitude:</span>
+            <span className="text-slate-200">{selectedBuilding.latitude.toFixed(5)}° N</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Longitude:</span>
+            <span className="text-slate-200">{selectedBuilding.longitude.toFixed(5)}° E</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Locality:</span>
+            <span className="text-slate-200">Nagpur Urban Zone</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">District:</span>
+            <span className="text-slate-200">Nagpur</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">State:</span>
+            <span className="text-slate-200">Maharashtra</span>
+          </div>
+          <div className="flex justify-between py-1 mt-2">
+            <span className="text-slate-400">Data Status:</span>
+            <span className="text-amber-500 font-bold">DEMO COORDINATE</span>
+          </div>
+        </div>
+      </div>
+
+      {/* FLOOR & PROPERTY SELECTION */}
+      <div className="glass rounded-2xl p-5 border border-emerald/25 space-y-4 glow-emerald">
+        <h3 className="text-xs font-bold text-emerald uppercase tracking-wider font-mono flex items-center gap-2">
+          <Layers className="w-4 h-4" /> 3D Spatial Navigation
+        </h3>
+        
+        {/* Floor Level Range Slider */}
+        <div className="space-y-1.5">
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-slate-400 font-mono text-[11px]">Select Floor Level:</span>
+            <span className="text-emerald font-bold font-mono">Floor {selectedFloorNumber}</span>
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={selectedBuilding.totalFloors}
+            value={selectedFloorNumber}
+            onChange={(e) => onSelectFloor(Number(e.target.value))}
+            className="w-full cursor-pointer accent-emerald"
+          />
+          <div className="flex justify-between text-[10px] font-mono text-slate-500">
+            <span className={1 === selectedFloorNumber ? 'text-emerald font-bold' : ''}>F1</span>
+            <span className={selectedBuilding.totalFloors === selectedFloorNumber ? 'text-emerald font-bold' : ''}>F{selectedBuilding.totalFloors}</span>
+          </div>
+        </div>
+
+        {/* Flat Unit Toggle */}
+        <div className="space-y-2 pt-2">
+          <label className="text-[11px] text-slate-400 font-mono block">Select Property Unit:</label>
+          <div className="grid grid-cols-2 gap-2">
+            {activeFloor.properties.map((prop) => {
+              const isSelected = activeProperty.id === prop.id;
+              return (
+                <button
+                  key={prop.id}
+                  onClick={() => onSelectProperty(prop)}
+                  className={`py-2 px-3 rounded-lg border text-xs font-mono transition-all ${
+                    isSelected
+                      ? 'bg-emerald/20 border-emerald text-emerald font-bold glow-emerald'
+                      : 'glass border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {prop.flatNumber}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* PROPERTY INFORMATION */}
+      <div className="glass rounded-2xl p-5 border border-cyan-500/30 space-y-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Home className="w-4 h-4 text-cyan-400" />
+          <h3 className="text-xs font-bold text-white uppercase tracking-wider font-mono">Property Information</h3>
+        </div>
+        
+        <div className="space-y-1.5 text-[11px] font-mono">
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Property ID:</span>
+            <span className="text-slate-200 font-bold text-right">{activeProperty.id}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Flat / Unit:</span>
+            <span className="text-cyan-400 font-bold">{activeProperty.flatNumber}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Floor Number:</span>
+            <span className="text-slate-200">{activeProperty.floorNumber}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Property Type:</span>
+            <span className="text-slate-200">{activeProperty.propertyType}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Carpet Area:</span>
+            <span className="text-slate-200">{activeProperty.areaSqFt} sq ft</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Built-up Area:</span>
+            <span className="text-slate-200">{activeProperty.areaSqM.toFixed(1)} m²</span>
+          </div>
+          
+          <div className="pt-2 pb-1 text-cyan-400 font-bold mt-2">Volumetric Bounds</div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Bottom Z-Elevation:</span>
+            <span className="text-emerald font-bold">{activeProperty.bottomElevationM.toFixed(2)} m</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Top Z-Elevation:</span>
+            <span className="text-emerald font-bold">{activeProperty.topElevationM.toFixed(2)} m</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Height:</span>
+            <span className="text-slate-200">{activeProperty.heightM.toFixed(2)} m</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-800/50">
+            <span className="text-slate-400">Approx Volume:</span>
+            <span className="text-slate-200">{activeProperty.volumeM3.toFixed(1)} m³</span>
+          </div>
+          <div className="flex justify-between py-1 mt-2">
+            <span className="text-slate-400">Property Status:</span>
+            <span className="text-amber-500 font-bold">DEMO / SYNTHETIC</span>
+          </div>
+
+          {/* Property Owner */}
+          <div className="mt-3 p-3 rounded-xl bg-slate-900/80 border border-slate-700/50">
+            <span className="text-[10px] text-slate-500 uppercase block mb-1">Unit Property Holder</span>
+            <div className="flex items-center gap-2 mb-1">
+              <User className="w-3.5 h-3.5 text-amber-500" />
+              <span className="text-xs font-bold text-white">{propertyOwner.name}</span>
             </div>
-            <div className="mt-2 flex items-center justify-center gap-2">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-slate-400">Type: {propertyOwner.type}</span>
+              <span className="text-amber-500 font-bold px-1.5 rounded bg-amber-500/10">DEMO OWNER DATA</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* DATA PROVENANCE & ULPIN GENERATOR */}
+      <div className="glass rounded-2xl p-5 border border-amber-500/30 space-y-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Database className="w-4 h-4 text-amber-500" />
+          <h3 className="text-xs font-bold text-white uppercase tracking-wider font-mono">Data Provenance</h3>
+        </div>
+        
+        <div className="space-y-1.5 text-[10px] font-mono mb-4">
+          <div className="flex justify-between py-1">
+            <span className="text-slate-400">Data Source:</span>
+            <span className="text-amber-400 text-right font-bold">Synthetic Demonstration Dataset</span>
+          </div>
+          <div className="flex justify-between py-1">
+            <span className="text-slate-400">Authority:</span>
+            <span className="text-slate-300">Not Connected</span>
+          </div>
+          <div className="flex justify-between py-1">
+            <span className="text-slate-400">Gov Database:</span>
+            <span className="text-slate-300">NOT CONNECTED</span>
+          </div>
+          <div className="flex justify-between py-1">
+            <span className="text-slate-400">Official ULPIN:</span>
+            <span className="text-red-400 font-bold">NOT AVAILABLE</span>
+          </div>
+          <div className="flex justify-between py-1">
+            <span className="text-slate-400">Visualization:</span>
+            <span className="text-slate-300">Demo Building Template</span>
+          </div>
+        </div>
+
+        <div className="p-3 rounded-xl bg-slate-950/80 border border-emerald/30 text-center space-y-3">
+          <p className="text-[10px] uppercase tracking-widest text-slate-400 font-mono">Prototype 3D Property ID</p>
+          
+          {!generatedProperty ? (
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating}
+              className="w-full py-2 rounded-lg bg-emerald/10 border border-emerald/50 text-emerald font-bold hover:bg-emerald/20 transition-all font-mono text-xs"
+            >
+              {isGenerating ? 'GENERATING...' : 'GENERATE PROTOTYPE ID'}
+            </button>
+          ) : (
+            <div className="animate-fade-in">
+              <p className="text-sm font-mono font-bold text-emerald text-glow break-all mb-2">
+                {generatedProperty.prototype3DId}
+              </p>
+              
               <button
-                onClick={onCopy}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg glass border border-cyber/20 text-xs text-slate-300 hover:border-emerald/40 hover:text-emerald transition-all"
+                onClick={handleCopy}
+                className="w-full py-1.5 rounded-lg glass border border-emerald/30 text-xs text-emerald hover:bg-emerald/10 transition-all flex items-center justify-center gap-1.5 font-mono"
               >
                 {copied ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald" />
-                    Copied!
-                  </>
+                  <><Check className="w-3.5 h-3.5" /> Copied!</>
                 ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    Copy to Clipboard
-                  </>
+                  <><Copy className="w-3.5 h-3.5" /> Copy Identifier</>
                 )}
               </button>
-              <span className={`text-[10px] px-2 py-1 rounded-full font-semibold ${
-                result.source === 'api'
-                  ? 'bg-emerald/15 text-emerald border border-emerald/30'
-                  : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-              }`}>
-                {result.source === 'api' ? 'LIVE API' : 'MOCK FALLBACK'}
-              </span>
             </div>
-          </div>
-
-          {/* Spatial Metadata */}
-          <div className="mb-4">
-            <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">Spatial Metadata</p>
-            <div className="glass rounded-xl p-3">
-              <MetaRow icon={Globe2} label="Latitude" value={result.metadata.latitude} unit="°N" />
-              <MetaRow icon={Globe2} label="Longitude" value={result.metadata.longitude} unit="°E" />
-              <MetaRow icon={Mountain} label="Altitude (Z-Height)" value={result.metadata.altitude} unit="m" />
-              <MetaRow icon={Ruler} label="Total Area" value={result.metadata.totalArea.toLocaleString()} unit="sq ft" />
-              <MetaRow icon={Calendar} label="Registration Date" value={result.metadata.registrationDate} />
-            </div>
-          </div>
-
-          {/* Ownership Card */}
-          <div>
-            <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">Ownership & Status</p>
-            <div className="glass rounded-xl p-3 space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald to-cyber flex items-center justify-center flex-shrink-0">
-                  <User className="w-4 h-4 text-slate-950" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">Registered Owner</p>
-                  <p className="text-sm font-semibold text-white truncate">{result.metadata.ownerName}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald/10 border border-emerald/30">
-                  <Receipt className="w-4 h-4 text-emerald flex-shrink-0" />
-                  <div>
-                    <p className="text-[9px] text-slate-500 uppercase">Property Tax</p>
-                    <p className="text-xs font-bold text-emerald">PAID</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald/10 border border-emerald/30">
-                  <FileCheck className="w-4 h-4 text-emerald flex-shrink-0" />
-                  <div>
-                    <p className="text-[9px] text-slate-500 uppercase">Encumbrance</p>
-                    <p className="text-xs font-bold text-emerald">CLEAR</p>
-                  </div>
-                </div>
-              </div>
-            </div>
+          )}
+          <div className="text-[9px] text-amber-500/80 font-mono leading-tight pt-1">
+            NOT AN OFFICIAL GOVERNMENT ULPIN<br/>Prototype identifier for SIH demo only.
           </div>
         </div>
-      )}
+      </div>
+
     </div>
   );
 }

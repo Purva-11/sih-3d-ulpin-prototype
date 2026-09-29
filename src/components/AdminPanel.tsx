@@ -1,289 +1,246 @@
-import { useState } from 'react';
-import {
-  ChevronDown,
-  User,
-  Hash,
-  MapPin,
-  Layers,
-  Ruler,
-  Home,
-  Receipt,
-  Globe,
-  Loader2,
-  Box,
-  Satellite,
-  AlertCircle,
-  CheckCircle2,
-} from 'lucide-react';
-import type { OSMBuilding } from '@/services/api';
-
-export interface AdminFormData {
-  ownerName: string;
-  surveyPlot: string;
-  latitude: number;
-  longitude: number;
-  totalFloors: number;
-  floorHeightM: number;
-  flatUnit: string;
-  taxStatus: 'PAID' | 'PENDING';
-}
+import React, { useState, ChangeEvent, FormEvent } from 'react';
+import { Upload, FileImage, Layers, Building, MapPin, Database, RefreshCw, CheckCircle } from 'lucide-react';
+import { Parcel, Building as BuildingType, PropertyVolume } from '../types/cadastral';
 
 interface AdminPanelProps {
-  formData: AdminFormData;
-  setFormData: (data: AdminFormData) => void;
-  useOSM: boolean;
-  setUseOSM: (v: boolean) => void;
-  onFetchOSM: () => void;
-  osmLoading: boolean;
-  osmBuildings: OSMBuilding[];
-  osmError: string | null;
-  onSubmit: () => void;
-  submitting: boolean;
+  onUpdateParcel: (updated: Partial<Parcel>) => void;
+  onUpdateBuilding: (updated: Partial<BuildingType>) => void;
+  onUpdateProperty: (updated: Partial<PropertyVolume>) => void;
+  onUploadBlueprint?: (file: File) => void;
 }
-
-function Field({
-  icon: Icon,
-  label,
-  children,
-}: {
-  icon: React.ElementType;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 flex items-center gap-1.5">
-        <Icon className="w-3.5 h-3.5 text-cyber" />
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-const inputClass =
-  'w-full px-3 py-2.5 text-sm rounded-lg glass border border-cyber/20 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-emerald/50 focus:ring-1 focus:ring-emerald/30 transition-all';
 
 export default function AdminPanel({
-  formData,
-  setFormData,
-  useOSM,
-  setUseOSM,
-  onFetchOSM,
-  osmLoading,
-  osmBuildings,
-  osmError,
-  onSubmit,
-  submitting,
+  onUpdateParcel,
+  onUpdateBuilding,
+  onUpdateProperty,
+  onUploadBlueprint,
 }: AdminPanelProps) {
-  const [open, setOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState<'parcel' | 'building' | 'property' | 'underground'>('parcel');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  const update = <K extends keyof AdminFormData>(key: K, value: AdminFormData[K]) => {
-    setFormData({ ...formData, [key]: value });
+  // Form states
+  const [parcelForm, setParcelForm] = useState({
+    surveyNumber: '402/A',
+    legacyUlpin: '142857361049',
+    stateCode: 'MH',
+    districtCode: 'NGP',
+    areaSqM: 1250.5,
+    latitude: 21.1458,
+    longitude: 79.0882,
+  });
+
+  const [buildingForm, setBuildingForm] = useState({
+    name: 'Godavari Heights — Block A',
+    totalFloors: 5,
+    floorHeightM: 3.2,
+  });
+
+  const [propertyForm, setPropertyForm] = useState({
+    flatNumber: 'Flat 402',
+    ownerName: 'Rahul Sharma',
+    areaSqFt: 870,
+    bottomElevationM: 12.8,
+    topElevationM: 16.0,
+  });
+
+  const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+      if (onUploadBlueprint) onUploadBlueprint(file);
+    }
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (activeTab === 'parcel') {
+      onUpdateParcel(parcelForm);
+    } else if (activeTab === 'building') {
+      onUpdateBuilding(buildingForm);
+    } else if (activeTab === 'property') {
+      onUpdateProperty(propertyForm);
+    }
   };
 
   return (
-    <div className="glass rounded-2xl border border-cyber/15 overflow-hidden">
-      {/* Header */}
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-700/20 transition-colors"
-      >
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald/30 to-cyber/20 flex items-center justify-center">
-            <Box className="w-4 h-4 text-emerald" />
-          </div>
-          <div className="text-left">
-            <h2 className="text-sm font-bold text-white">Ministry Admin Data Entry Portal</h2>
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Government Registration Module</p>
-          </div>
-        </div>
-        <ChevronDown
-          className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
-
-      {/* Body */}
-      <div
-        className={`transition-all duration-300 overflow-hidden ${
-          open ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
-        }`}
-      >
-        <div className="px-5 pb-5 space-y-3.5">
-          <div className="h-px bg-gradient-to-r from-transparent via-cyber/20 to-transparent mb-1" />
-
-          <Field icon={User} label="Owner Name">
-            <input
-              type="text"
-              value={formData.ownerName}
-              onChange={(e) => update('ownerName', e.target.value)}
-              placeholder="Rahul Sharma"
-              className={inputClass}
-            />
-          </Field>
-
-          <Field icon={Hash} label="Survey Plot Number">
-            <input
-              type="text"
-              value={formData.surveyPlot}
-              onChange={(e) => update('surveyPlot', e.target.value)}
-              placeholder="PLOT-402"
-              className={`${inputClass} font-mono`}
-            />
-          </Field>
-
-          {/* Lat / Long side by side */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field icon={Globe} label="Latitude">
-              <input
-                type="number"
-                step="0.000001"
-                value={formData.latitude}
-                onChange={(e) => update('latitude', parseFloat(e.target.value) || 0)}
-                className={`${inputClass} font-mono`}
-              />
-            </Field>
-            <Field icon={Globe} label="Longitude">
-              <input
-                type="number"
-                step="0.000001"
-                value={formData.longitude}
-                onChange={(e) => update('longitude', parseFloat(e.target.value) || 0)}
-                className={`${inputClass} font-mono`}
-              />
-            </Field>
-          </div>
-
-          {/* OSM toggle */}
-          <div className="glass rounded-xl p-3 border border-cyber/15">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <Satellite className="w-4 h-4 text-cyber" />
-                <span className="text-xs font-semibold text-slate-300">Use Real-World Building Footprint (OSM)</span>
-              </div>
-              <button
-                onClick={() => setUseOSM(!useOSM)}
-                className={`relative w-11 h-6 rounded-full transition-colors duration-300 ${
-                  useOSM ? 'bg-emerald' : 'bg-slate-700'
-                }`}
-              >
-                <div
-                  className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform duration-300 ${
-                    useOSM ? 'translate-x-5' : 'translate-x-0.5'
-                  }`}
-                />
-              </button>
-            </div>
-
-            <button
-              onClick={onFetchOSM}
-              disabled={!useOSM || osmLoading}
-              className="w-full py-2 rounded-lg text-xs font-semibold border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-                useOSM
-                  ? 'bg-cyber/15 border-cyber/40 text-cyber hover:bg-cyber/25'
-                  : 'bg-slate-700/30 border-slate-600/30 text-slate-500'
-              }"
-            >
-              {osmLoading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin-slow" />
-                  Fetching from Overpass API...
-                </span>
-              ) : (
-                'Fetch Location'
-              )}
-            </button>
-
-            {osmError && (
-              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-400">
-                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                {osmError}
-              </div>
-            )}
-
-            {osmBuildings.length > 0 && (
-              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald">
-                <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
-                {osmBuildings.length} building(s) found · Footprint loaded
-              </div>
-            )}
-          </div>
-
-          {/* Floor slider 1-20 */}
-          <Field icon={Layers} label={`Total Building Floors (${formData.totalFloors})`}>
-            <input
-              type="range"
-              min={1}
-              max={20}
-              value={formData.totalFloors}
-              onChange={(e) => update('totalFloors', Number(e.target.value))}
-              className="w-full cursor-pointer"
-            />
-            <div className="flex justify-between mt-1">
-              {[1, 5, 10, 15, 20].map((n) => (
-                <span
-                  key={n}
-                  className={`text-[10px] font-mono ${n === formData.totalFloors ? 'text-emerald font-bold' : 'text-slate-600'}`}
-                >
-                  {n}
-                </span>
-              ))}
-            </div>
-          </Field>
-
-          <Field icon={Ruler} label="Floor Height in Meters">
-            <input
-              type="number"
-              step="0.1"
-              min="1"
-              max="10"
-              value={formData.floorHeightM}
-              onChange={(e) => update('floorHeightM', parseFloat(e.target.value) || 3.2)}
-              className={`${inputClass} font-mono`}
-            />
-          </Field>
-
-          <Field icon={Home} label="Selected Flat Unit">
-            <input
-              type="text"
-              value={formData.flatUnit}
-              onChange={(e) => update('flatUnit', e.target.value)}
-              placeholder="402"
-              className={`${inputClass} font-mono`}
-            />
-          </Field>
-
-          <Field icon={Receipt} label="Property Tax Status">
-            <select
-              value={formData.taxStatus}
-              onChange={(e) => update('taxStatus', e.target.value as 'PAID' | 'PENDING')}
-              className={`${inputClass} cursor-pointer`}
-            >
-              <option value="PAID">PAID</option>
-              <option value="PENDING">PENDING</option>
-            </select>
-          </Field>
-
-          {/* Submit button */}
-          <button
-            onClick={onSubmit}
-            disabled={submitting}
-            className="w-full mt-2 py-3 rounded-xl bg-gradient-to-r from-emerald to-cyber text-slate-950 font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed glow-emerald"
-          >
-            {submitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin-slow" />
-                Registering & Generating Mesh...
-              </>
-            ) : (
-              <>
-                <Box className="w-4 h-4" />
-                Register & Generate 3D Building Mesh
-              </>
-            )}
-          </button>
-        </div>
+    <aside className="w-full md:w-96 bg-slate-900/90 backdrop-blur-md border-r border-slate-800 text-white p-5 overflow-y-auto h-screen space-y-5">
+      <div>
+        <h2 className="text-sm font-bold text-emerald flex items-center gap-2">
+          <Building className="text-emerald" size={18} />
+          Ministry Admin & Survey Portal
+        </h2>
+        <p className="text-[10px] text-slate-400 font-mono mt-0.5">SIH26011: Data Entry & Spatial Verification</p>
       </div>
-    </div>
+
+      {/* Blueprint Upload */}
+      <div className="glass p-3.5 rounded-xl border border-slate-700/60 space-y-2.5">
+        <h3 className="text-xs font-semibold text-emerald flex items-center gap-2 uppercase tracking-wider font-mono">
+          <FileImage size={14} /> Upload 2D CAD / Drone Blueprint
+        </h3>
+
+        <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-700 hover:border-emerald bg-slate-950/60 p-3.5 rounded-xl cursor-pointer transition">
+          <Upload className="text-slate-400 mb-1" size={18} />
+          <span className="text-[11px] text-slate-300 font-medium text-center">
+            {selectedFile ? selectedFile.name : 'Select 2D Floorplan Image / DWG'}
+          </span>
+          <span className="text-[9px] text-slate-500 mt-0.5 font-mono">PNG, JPG, SVG, CAD Layout</span>
+          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+        </label>
+
+        {previewUrl && (
+          <div className="relative rounded-lg overflow-hidden border border-slate-600">
+            <img src={previewUrl} alt="2D Blueprint Preview" className="w-full h-20 object-cover" />
+            <span className="absolute top-1.5 right-1.5 bg-emerald text-slate-950 text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow">
+              <CheckCircle size={10} /> Extrusion Reference Ready
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Tab Navigation */}
+      <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-mono">
+        <button
+          onClick={() => setActiveTab('parcel')}
+          className={`flex-1 py-1.5 rounded-lg font-bold transition-all ${
+            activeTab === 'parcel' ? 'bg-emerald text-slate-950' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          Parcel
+        </button>
+        <button
+          onClick={() => setActiveTab('building')}
+          className={`flex-1 py-1.5 rounded-lg font-bold transition-all ${
+            activeTab === 'building' ? 'bg-emerald text-slate-950' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          Building
+        </button>
+        <button
+          onClick={() => setActiveTab('property')}
+          className={`flex-1 py-1.5 rounded-lg font-bold transition-all ${
+            activeTab === 'property' ? 'bg-emerald text-slate-950' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          Property
+        </button>
+      </div>
+
+      {/* Form Editor */}
+      <form onSubmit={handleSubmit} className="glass p-4 rounded-xl border border-slate-800 space-y-3">
+        {activeTab === 'parcel' && (
+          <>
+            <h3 className="text-xs font-semibold text-emerald font-mono uppercase tracking-wider flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5" /> 1. Land Parcel Spatial Attributes
+            </h3>
+            <div>
+              <label className="text-[10px] text-slate-400 font-mono">Survey Plot Number</label>
+              <input
+                type="text"
+                value={parcelForm.surveyNumber}
+                onChange={(e) => setParcelForm({ ...parcelForm, surveyNumber: e.target.value })}
+                className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-400 font-mono">Existing 2D ULPIN — DEMO / SYNTHETIC</label>
+              <input
+                type="text"
+                value={parcelForm.legacyUlpin}
+                onChange={(e) => setParcelForm({ ...parcelForm, legacyUlpin: e.target.value })}
+                className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-slate-400 font-mono">Latitude (°N)</label>
+                <input
+                  type="number"
+                  step="0.0001"
+                  value={parcelForm.latitude}
+                  onChange={(e) => setParcelForm({ ...parcelForm, latitude: Number(e.target.value) })}
+                  className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 font-mono">Longitude (°E)</label>
+                <input
+                  type="number"
+                  step="0.0001"
+                  value={parcelForm.longitude}
+                  onChange={(e) => setParcelForm({ ...parcelForm, longitude: Number(e.target.value) })}
+                  className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+                />
+              </div>
+            </div>
+          </>
+        )}
+
+        {activeTab === 'building' && (
+          <>
+            <h3 className="text-xs font-semibold text-cyber font-mono uppercase tracking-wider flex items-center gap-1.5">
+              <Building className="w-3.5 h-3.5" /> 2. Building Structure Parameters
+            </h3>
+            <div>
+              <label className="text-[10px] text-slate-400 font-mono">Building Name</label>
+              <input
+                type="text"
+                value={buildingForm.name}
+                onChange={(e) => setBuildingForm({ ...buildingForm, name: e.target.value })}
+                className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+              />
+            </div>
+            <div>
+              <div className="flex justify-between">
+                <label className="text-[10px] text-slate-400 font-mono">Total Floors</label>
+                <span className="text-xs font-bold text-emerald">{buildingForm.totalFloors} Floors</span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="10"
+                value={buildingForm.totalFloors}
+                onChange={(e) => setBuildingForm({ ...buildingForm, totalFloors: Number(e.target.value) })}
+                className="w-full accent-emerald mt-1 cursor-pointer"
+              />
+            </div>
+          </>
+        )}
+
+        {activeTab === 'property' && (
+          <>
+            <h3 className="text-xs font-semibold text-purple-400 font-mono uppercase tracking-wider flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5" /> 3. 3D Property Volume Bounds
+            </h3>
+            <div>
+              <label className="text-[10px] text-slate-400 font-mono">Flat / Property Number</label>
+              <input
+                type="text"
+                value={propertyForm.flatNumber}
+                onChange={(e) => setPropertyForm({ ...propertyForm, flatNumber: e.target.value })}
+                className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-400 font-mono">Registered Owner Name</label>
+              <input
+                type="text"
+                value={propertyForm.ownerName}
+                onChange={(e) => setPropertyForm({ ...propertyForm, ownerName: e.target.value })}
+                className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+              />
+            </div>
+          </>
+        )}
+
+        <button
+          type="submit"
+          className="w-full py-2.5 rounded-xl bg-emerald hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all glow-emerald mt-2"
+        >
+          <RefreshCw className="w-3.5 h-3.5" /> Save & Update 3D Scene Model
+        </button>
+      </form>
+    </aside>
   );
 }

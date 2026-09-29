@@ -1,33 +1,34 @@
 import axios from 'axios';
 
-export interface ULPINRequest {
-  stateCode: string;
-  districtCode: string;
-  surveyPlotNo: string;
-  floorLevel: number;
-  flatUnit: string;
-  ownerName?: string;
-  latitude?: number;
-  longitude?: number;
-  totalFloors?: number;
-  floorHeightM?: number;
-  taxStatus?: 'PAID' | 'PENDING';
+export interface VolumetricPropertyRequest {
+  localityCode?: string;
+  parcelId: string;
+  buildingId: string;
+  floorId: string;
+  propertyId: string;
+  floorNumber: number;
+  zMinM: number;
+  zMaxM: number;
+  footprintAreaM2: number;
 }
 
-export interface ULPINResponse {
-  ulpin: string;
-  source: 'api' | 'mock';
-  metadata: {
-    latitude: number;
-    longitude: number;
-    altitude: number;
-    totalArea: number;
-    ownerName: string;
-    propertyTaxStatus: 'PAID' | 'DUE' | 'PENDING';
-    encumbranceStatus: 'CLEAR' | 'ENCUMBERED';
-    registrationDate: string;
-    surveyPlot?: string;
-  };
+export interface VolumetricPropertyResponse {
+  prototype3DId: string;
+  status: string;
+  officialUlpIn: string | null;
+  parcelId: string;
+  buildingId: string;
+  floorId: string;
+  propertyId: string;
+  floorNumber: number;
+  zMinM: number;
+  zMaxM: number;
+  verticalHeightM: number;
+  footprintAreaM2: number;
+  volumeM3: number;
+  idSchemeVersion: string;
+  sourceType: string;
+  message?: string;
 }
 
 export interface OSMBuilding {
@@ -76,143 +77,48 @@ export interface BuildingData {
   floors: BuildingFloor[];
 }
 
-const API_URL = '/api/generate-ulpin';
-const API_LOOKUP_URL = '/api/lookup-ulpin';
-const API_BUILDING_URL = '/api/building-floors';
-const API_OSM_URL = '/api/osm-buildings';
+const API_VOLUMETRIC_GEN_URL = 'http://localhost:5000/api/volumetric-properties/generate';
+const API_VOLUMETRIC_LOOKUP_URL = 'http://localhost:5000/api/volumetric-properties';
+const API_BUILDING_URL = 'http://localhost:5000/api/building-floors';
+const API_OSM_URL = 'http://localhost:5000/api/osm/buildings';
 
-const STATE_DISTRICT_COORDS: Record<
-  string,
-  Record<string, { lat: number; lng: number; alt: number }>
-> = {
-  MH: {
-    NGP: { lat: 21.1458, lng: 79.0882, alt: 310 },
-    MUM: { lat: 19.076, lng: 72.8777, alt: 14 },
-    PUN: { lat: 18.5204, lng: 73.8567, alt: 560 },
-  },
-  DL: {
-    CND: { lat: 28.7041, lng: 77.1025, alt: 216 },
-    NDL: { lat: 28.6139, lng: 77.209, alt: 216 },
-  },
-  KA: {
-    BLR: { lat: 12.9716, lng: 77.5946, alt: 920 },
-    MYS: { lat: 12.2958, lng: 76.6394, alt: 763 },
-  },
-  TN: {
-    CEN: { lat: 13.0827, lng: 80.2707, alt: 6 },
-    COI: { lat: 11.0168, lng: 76.9558, alt: 411 },
-  },
-};
 
-function hashCode(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return hash;
-}
-
-function getCoordinates(stateCode: string, districtCode: string, floorLevel: number) {
-  const state = STATE_DISTRICT_COORDS[stateCode] || STATE_DISTRICT_COORDS.MH;
-  const coords = state[districtCode] || state.NGP || { lat: 21.1458, lng: 79.0882, alt: 310 };
+function buildMockResponse(req: VolumetricPropertyRequest): VolumetricPropertyResponse {
+  const st = req.localityCode || 'MH-NGP';
+  const p = req.parcelId.toUpperCase();
+  const b = req.buildingId.toUpperCase();
+  const f = String(req.floorNumber).padStart(2, '0');
+  const u = req.propertyId.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(-3).padStart(2, '0');
+  const prototype3DId = `B3D-${st}-${p}-${b}-F${f}-U${u}`;
+  
   return {
-    latitude: parseFloat((coords.lat + (Math.random() - 0.5) * 0.01).toFixed(6)),
-    longitude: parseFloat((coords.lng + (Math.random() - 0.5) * 0.01).toFixed(6)),
-    altitude: coords.alt + floorLevel * 3.2,
+    prototype3DId,
+    status: 'PROTOTYPE',
+    officialUlpIn: null,
+    parcelId: req.parcelId,
+    buildingId: req.buildingId,
+    floorId: req.floorId,
+    propertyId: req.propertyId,
+    floorNumber: req.floorNumber,
+    zMinM: req.zMinM,
+    zMaxM: req.zMaxM,
+    verticalHeightM: req.zMaxM - req.zMinM,
+    footprintAreaM2: req.footprintAreaM2,
+    volumeM3: (req.zMaxM - req.zMinM) * req.footprintAreaM2,
+    idSchemeVersion: 'B3D-V1',
+    sourceType: 'SYNTHETIC',
+    message: 'Prototype 3D Property ID Generated (Mock)'
   };
 }
 
-function generateMockULPIN(req: ULPINRequest): string {
-  const statePart = req.stateCode.toUpperCase();
-  const districtNum = String(Math.abs(hashCode(req.districtCode)) % 99 + 1).padStart(2, '0');
-  const lat = req.latitude ?? 21.1458;
-  const lng = req.longitude ?? 79.0882;
-  const hexPart = Math.abs(hashCode(`${lat.toFixed(6)},${lng.toFixed(6)}`))
-    .toString(16)
-    .substring(0, 6)
-    .toUpperCase()
-    .padStart(6, '0');
-  const floorPart = `Z${String(req.floorLevel).padStart(2, '0')}`;
-  const unitNum = req.flatUnit.replace(/\D/g, '');
-  const unitPart = `U${unitNum.padStart(3, '0')}`;
-
-  return `${statePart}${districtNum}-${hexPart}-${floorPart}-${unitPart}`;
-}
-
-function buildMockMetadata(req: ULPINRequest) {
-  const coords = getCoordinates(req.stateCode, req.districtCode, req.floorLevel);
-  const baseArea = 850 + (req.floorLevel * 25);
-  const ownerNames = [
-    'Rajesh Kumar Sharma', 'Priya Anand Deshmukh', 'Arun Venkatraman Iyer',
-    'Sunita Mahesh Patil', 'Vikram Singh Rathore', 'Anjali Krishnamurthy',
-  ];
-  const ownerName = req.ownerName || ownerNames[Math.abs(hashCode(req.surveyPlotNo + req.flatUnit)) % ownerNames.length];
-  const floorHeight = req.floorHeightM ?? 3.2;
-
-  return {
-    latitude: req.latitude ?? coords.latitude,
-    longitude: req.longitude ?? coords.longitude,
-    altitude: parseFloat((req.floorLevel * floorHeight).toFixed(2)),
-    totalArea: baseArea + (Math.abs(hashCode(req.flatUnit)) % 80),
-    ownerName,
-    propertyTaxStatus: (req.taxStatus || 'PAID') as 'PAID' | 'DUE' | 'PENDING',
-    encumbranceStatus: 'CLEAR' as const,
-    registrationDate: new Date().toISOString().split('T')[0],
-    surveyPlot: req.surveyPlotNo,
-  };
-}
-
-function buildMockResponse(req: ULPINRequest): ULPINResponse {
-  return {
-    ulpin: generateMockULPIN(req),
-    source: 'mock',
-    metadata: buildMockMetadata(req),
-  };
-}
-
-export async function generateULPIN(req: ULPINRequest): Promise<ULPINResponse> {
-  const coords = getCoordinates(req.stateCode, req.districtCode, req.floorLevel);
-  const flatNumber = parseInt(req.flatUnit.replace(/\D/g, ''), 10) || 401;
-  const latitude = req.latitude ?? coords.latitude;
-  const longitude = req.longitude ?? coords.longitude;
-
-  const payload = {
-    latitude,
-    longitude,
-    state_code: req.stateCode,
-    district_code: req.districtCode,
-    floor_number: req.floorLevel,
-    flat_number: flatNumber,
-    floor_height_m: req.floorHeightM ?? 3.2,
-    owner_name: req.ownerName,
-    survey_plot: req.surveyPlotNo,
-    property_tax_status: req.taxStatus || 'PAID',
-  };
-
+export async function generateVolumetricProperty(req: VolumetricPropertyRequest): Promise<VolumetricPropertyResponse> {
   try {
-    const response = await axios.post(API_URL, payload, {
+    const response = await axios.post(API_VOLUMETRIC_GEN_URL, req, {
       timeout: 5000,
       headers: { 'Content-Type': 'application/json' },
     });
-
-    if (response.data && response.data.success && response.data.ulpin) {
-      const meta = response.data.metadata;
-      return {
-        ulpin: response.data.ulpin,
-        source: 'api',
-        metadata: {
-          latitude: meta.latitude,
-          longitude: meta.longitude,
-          altitude: meta.elevation_meters ?? req.floorLevel * 3.2,
-          totalArea: meta.total_area_sqft ?? 850 + req.floorLevel * 25,
-          ownerName: meta.owner_name ?? '—',
-          propertyTaxStatus: (meta.property_tax_status ?? 'PAID') as 'PAID' | 'DUE' | 'PENDING',
-          encumbranceStatus: (meta.encumbrance_status ?? 'CLEAR') as 'CLEAR' | 'ENCUMBERED',
-          registrationDate: meta.registration_date ?? new Date().toISOString().split('T')[0],
-          surveyPlot: meta.survey_plot ?? req.surveyPlotNo,
-        },
-      };
+    if (response.data && response.data.prototype3DId) {
+      return response.data;
     }
     return buildMockResponse(req);
   } catch {
@@ -220,10 +126,10 @@ export async function generateULPIN(req: ULPINRequest): Promise<ULPINResponse> {
   }
 }
 
-export async function lookupULPIN(ulpin: string): Promise<ULPINResponse | null> {
+export async function lookupVolumetricProperty(id: string): Promise<VolumetricPropertyResponse | null> {
   try {
-    const response = await axios.get(`${API_LOOKUP_URL}/${ulpin}`, { timeout: 3000 });
-    if (response.data && response.data.success) return response.data as ULPINResponse;
+    const response = await axios.get(`${API_VOLUMETRIC_LOOKUP_URL}/${id}`, { timeout: 3000 });
+    if (response.data && response.data.prototype3DId) return response.data;
     return null;
   } catch {
     return null;
