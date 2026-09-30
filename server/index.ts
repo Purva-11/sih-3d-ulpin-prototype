@@ -40,7 +40,7 @@ app.use(express.static(distPath));
 
 // Fallback for non-API browser routes to serve React's index.html
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api')) {
+  if (req.path.startsWith('/api') || req.path.startsWith('/assets')) {
     return next();
   }
   res.sendFile(path.join(distPath, 'index.html'));
