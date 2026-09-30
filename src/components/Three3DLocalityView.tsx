@@ -34,7 +34,7 @@ function InstancedBuildings({
   onSelect: (id: string) => void
 }) {
   return (
-    <Instances limit={10000} castShadow receiveShadow>
+    <Instances limit={10000} castShadow receiveShadow frustumCulled={false}>
       <boxGeometry args={[1, 1, 1]} />
       <meshStandardMaterial roughness={0.8} metalness={0.1} />
       {buildings.map((b) => {
@@ -71,7 +71,7 @@ function InstancedBuildings({
 
 function InstancedParcels({ parcels, selectedParcelId }: { parcels: Parcel[], selectedParcelId: string | null }) {
   return (
-    <Instances limit={10000} receiveShadow>
+    <Instances limit={10000} receiveShadow frustumCulled={false}>
       <planeGeometry args={[1, 1]} />
       <meshBasicMaterial opacity={0.4} transparent />
       {parcels.map(p => {
@@ -96,7 +96,7 @@ function InstancedRoads({ features }: { features: ContextFeature[] }) {
   const roads = features.filter(f => f.type === 'ROAD');
   if (roads.length === 0) return null;
   return (
-    <Instances limit={500} receiveShadow>
+    <Instances limit={500} receiveShadow frustumCulled={false}>
       <planeGeometry args={[1, 1]} />
       <meshStandardMaterial roughness={1} />
       {roads.map(f => {
@@ -120,7 +120,7 @@ function InstancedParksAndComm({ features }: { features: ContextFeature[] }) {
   if (others.length === 0) return null;
   
   return (
-    <Instances limit={500} receiveShadow castShadow>
+    <Instances limit={500} receiveShadow castShadow frustumCulled={false}>
       <boxGeometry args={[1, 1, 1]} />
       <meshStandardMaterial roughness={0.9} />
       {others.map(f => {
@@ -173,28 +173,28 @@ function UndergroundInfrastructure() {
   return (
     <group>
       {/* Water: blue/cyan */}
-      <Instances limit={water.length} castShadow={false} receiveShadow={false}>
+      <Instances limit={water.length} castShadow={false} receiveShadow={false} frustumCulled={false}>
         <cylinderGeometry args={[1, 1, 1, 8]} />
         <meshStandardMaterial color="#06b6d4" roughness={0.3} metalness={0.6} emissive="#06b6d4" emissiveIntensity={0.2} />
         {water.map((s, i) => <Instance key={`w-${i}`} position={s.position as any} scale={s.scale as any} rotation={s.rotation as any} />)}
       </Instances>
       
       {/* Electrical: yellow/orange */}
-      <Instances limit={electrical.length} castShadow={false} receiveShadow={false}>
+      <Instances limit={electrical.length} castShadow={false} receiveShadow={false} frustumCulled={false}>
         <cylinderGeometry args={[1, 1, 1, 6]} />
         <meshStandardMaterial color="#f59e0b" roughness={0.5} metalness={0.8} emissive="#f59e0b" emissiveIntensity={0.3} />
         {electrical.map((s, i) => <Instance key={`e-${i}`} position={s.position as any} scale={s.scale as any} rotation={s.rotation as any} />)}
       </Instances>
 
       {/* Optical: purple/magenta */}
-      <Instances limit={optical.length} castShadow={false} receiveShadow={false}>
+      <Instances limit={optical.length} castShadow={false} receiveShadow={false} frustumCulled={false}>
         <cylinderGeometry args={[1, 1, 1, 4]} />
         <meshStandardMaterial color="#d946ef" roughness={0.2} metalness={0.9} emissive="#d946ef" emissiveIntensity={0.5} />
         {optical.map((s, i) => <Instance key={`o-${i}`} position={s.position as any} scale={s.scale as any} rotation={s.rotation as any} />)}
       </Instances>
 
       {/* Utility: green/teal */}
-      <Instances limit={utility.length} castShadow={false} receiveShadow={false}>
+      <Instances limit={utility.length} castShadow={false} receiveShadow={false} frustumCulled={false}>
         <cylinderGeometry args={[1, 1, 1, 8]} />
         <meshStandardMaterial color="#14b8a6" roughness={0.6} metalness={0.4} emissive="#14b8a6" emissiveIntensity={0.2} />
         {utility.map((s, i) => <Instance key={`u-${i}`} position={s.position as any} scale={s.scale as any} rotation={s.rotation as any} />)}
@@ -219,12 +219,44 @@ export default function Three3DLocalityView({
   const selectedParcelId = selectedBuilding?.parentParcelId || null;
 
   const controlsRef = useRef<any>(null);
+  const aboveGroundGroupRef = useRef<THREE.Group>(null);
 
   const handleFitLocality = () => {
-    if (controlsRef.current) {
-      // Zoom out to see a large area
-      controlsRef.current.object.position.set(200, 300, 200);
-      controlsRef.current.target.set(0, 0, 0);
+    if (controlsRef.current && controlsRef.current.object && aboveGroundGroupRef.current) {
+      // Ensure bounding boxes are computed for instanced meshes before sizing
+      aboveGroundGroupRef.current.traverse((child: any) => {
+        if (child.isInstancedMesh) {
+          child.computeBoundingBox();
+        }
+      });
+
+      const box = new THREE.Box3().setFromObject(aboveGroundGroupRef.current);
+      
+      if (!box.isEmpty()) {
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        
+        const size = new THREE.Vector3();
+        box.getSize(size);
+
+        // Add minimum size fallback
+        const maxDim = Math.max(size.x, size.z, 100);
+        
+        // Calculate appropriate camera distance to fit bounds (approx 45 FOV)
+        const distance = maxDim * 1.5;
+
+        // Set target to the center of the locality
+        controlsRef.current.target.set(center.x, 0, center.z);
+        
+        // Move camera to frame it from an isometric-like angle
+        controlsRef.current.object.position.set(
+          center.x + distance * 0.7,
+          distance * 0.8,
+          center.z + distance * 0.7
+        );
+        
+        controlsRef.current.update();
+      }
     }
   };
 
@@ -238,30 +270,32 @@ export default function Three3DLocalityView({
 
   return (
     <div className="relative w-full h-full bg-[#0F172A] overflow-hidden">
-      <Canvas shadows camera={{ position: [200, 300, 200], fov: 45 }}>
+      <Canvas shadows camera={{ position: [200, 300, 200], fov: 45, far: 15000 }}>
         <ambientLight intensity={0.5} />
         <directionalLight position={[100, 150, 100]} intensity={1.5} castShadow shadow-mapSize={[2048, 2048]} />
         
         <group position={[0, 0, 0]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <planeGeometry args={[5000, 5000]} />
+            <planeGeometry args={[15000, 15000]} />
             <meshStandardMaterial color="#0B0F19" roughness={1} transparent opacity={0.75} depthWrite={false} />
           </mesh>
-          <Grid args={[2000, 2000]} cellSize={5} cellThickness={0.5} cellColor="#1E293B" sectionSize={50} sectionColor="#334155" fadeDistance={1500} />
+          <Grid args={[10000, 10000]} cellSize={5} cellThickness={0.5} cellColor="#1E293B" sectionSize={50} sectionColor="#334155" fadeDistance={5000} />
           <ContactShadows opacity={0.6} scale={500} blur={2} far={20} color="#000000" />
         </group>
 
-        <InstancedParcels parcels={parcels} selectedParcelId={selectedParcelId} />
-        <InstancedRoads features={features} />
-        <InstancedParksAndComm features={features} />
-        
+        <group ref={aboveGroundGroupRef}>
+          <InstancedParcels parcels={parcels} selectedParcelId={selectedParcelId} />
+          <InstancedRoads features={features} />
+          <InstancedParksAndComm features={features} />
+          
+          <InstancedBuildings 
+            buildings={allBuildings} 
+            selectedId={selectedBuildingId}
+            onSelect={onSelectBuilding}
+          />
+        </group>
+
         <UndergroundInfrastructure />
-        
-        <InstancedBuildings 
-          buildings={allBuildings} 
-          selectedId={selectedBuildingId}
-          onSelect={onSelectBuilding}
-        />
 
         {selectedBuilding && (
           <Html position={[
@@ -281,9 +315,9 @@ export default function Three3DLocalityView({
           enablePan 
           enableZoom 
           enableRotate 
-          maxPolarAngle={Math.PI / 2 - 0.05}
+          maxPolarAngle={Math.PI}
           minDistance={10}
-          maxDistance={1500}
+          maxDistance={8000}
         />
       </Canvas>
 
