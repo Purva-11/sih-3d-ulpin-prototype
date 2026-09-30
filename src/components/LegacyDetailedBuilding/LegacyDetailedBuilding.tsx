@@ -113,7 +113,11 @@ export default function LegacyDetailedBuilding() {
 
   return (
     <div className="w-full h-full flex overflow-hidden bg-[#0B1120] text-slate-300 font-sans">
-      <LegacyAdminPanel onGenerate3D={handleAdminSubmit} />
+      <LegacyAdminPanel 
+        onGenerate3D={handleAdminSubmit} 
+        selectedFloor={floorLevel}
+        selectedFlat={flatUnit}
+      />
 
       <main className="flex-1 relative h-full">
         <Suspense fallback={<LoadingScreen />}>
@@ -124,6 +128,7 @@ export default function LegacyDetailedBuilding() {
             onSelectFloor={(idx) => {
               setSelectedFloor(idx);
               setFloorLevel(idx + 1);
+              setFlatUnit(`Flat ${idx + 1}01`);
             }}
             onHoverFloor={setHoveredFloor}
             focusTrigger={focusTrigger}
@@ -141,7 +146,10 @@ export default function LegacyDetailedBuilding() {
         surveyPlotNo={surveyPlotNo}
         setSurveyPlotNo={setSurveyPlotNo}
         floorLevel={floorLevel}
-        setFloorLevel={setFloorLevel}
+        setFloorLevel={(val) => {
+          setFloorLevel(val);
+          setSelectedFloor(val - 1);
+        }}
         flatUnit={flatUnit}
         setFlatUnit={setFlatUnit}
         onGenerate={handleControlGenerate}

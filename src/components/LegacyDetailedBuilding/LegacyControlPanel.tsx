@@ -145,7 +145,8 @@ export default function LegacyControlPanel(props: ControlPanelProps) {
   const topElevation = elevationStart + 3.2;
   const sqft = unitSuffix === 1 ? 880 : 870;
   const sqm = unitSuffix === 1 ? 81.75 : 80.82;
-  const volume = (sqm * 3.2).toFixed(1);
+  const volumeCubicMeters = sqm * 3.2;
+  const volumeCubicFeet = volumeCubicMeters * 35.3147;
 
   return (
     <div className="w-[340px] h-full flex flex-col gap-3 p-4 overflow-y-auto border-l border-slate-800/50 bg-[#0f172a]/50 z-10">
@@ -265,14 +266,14 @@ export default function LegacyControlPanel(props: ControlPanelProps) {
           
           <div className="h-px bg-slate-800 my-2"></div>
           
-          <div className="flex justify-between"><span className="text-slate-500">Bottom Z-Elevation:</span><span className="text-emerald-400 font-bold">{elevationStart.toFixed(2)} m</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Top Z-Elevation:</span><span className="text-emerald-400 font-bold">{topElevation.toFixed(2)} m</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Height (ΔZ):</span><span className="text-slate-300 font-bold">3.20 m</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Bottom Z-Elevation:</span><span className="text-emerald-400 font-bold">{(elevationStart * 3.28084).toFixed(2)} ft</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Top Z-Elevation:</span><span className="text-emerald-400 font-bold">{(topElevation * 3.28084).toFixed(2)} ft</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Height (ΔZ):</span><span className="text-slate-300 font-bold">10.50 ft</span></div>
           
           <div className="h-px bg-slate-800 my-2"></div>
           
-          <div className="flex justify-between"><span className="text-slate-500">Floor Area:</span><span className="text-slate-300 font-bold">{sqft} sq ft ({sqm.toFixed(2)} m²)</span></div>
-          <div className="flex justify-between pt-1"><span className="text-slate-500">Total Enclosed Volume:</span><span className="text-cyan-400 font-bold">{volume} m³</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Floor Area:</span><span className="text-slate-300 font-bold">{(sqm * 10.7639).toFixed(2)} sq ft</span></div>
+          <div className="flex justify-between pt-1"><span className="text-slate-500">Total Enclosed Volume:</span><span className="text-cyan-400 font-bold">{volumeCubicFeet.toFixed(0)} cu ft</span></div>
         </div>
       </div>
 

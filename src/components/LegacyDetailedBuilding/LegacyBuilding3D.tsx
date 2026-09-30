@@ -16,6 +16,39 @@ export interface BuildingConfig {
   osmLevels: number | null;
 }
 
+function UndergroundDemoPipelines({ baseY }: { baseY: number }) {
+  return (
+    <group position={[0, baseY, 0]}>
+      {/* Water Pipeline */}
+      <mesh position={[0, -0.5, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.12, 0.12, 12, 16]} />
+        <meshStandardMaterial color="#0ea5e9" metalness={0.4} roughness={0.6} />
+        <Html position={[0, 0.2, 0]} center distanceFactor={10}>
+          <div style={{ fontSize: '8px', color: '#0ea5e9', fontFamily: 'monospace', background: 'rgba(15,23,42,0.8)', padding: '2px 4px', borderRadius: '4px' }}>Water Pipeline</div>
+        </Html>
+      </mesh>
+      
+      {/* Electrical Cable */}
+      <mesh position={[-1.5, -1.2, 0.5]} rotation={[0, Math.PI / 6, Math.PI / 2]}>
+        <cylinderGeometry args={[0.08, 0.08, 10, 16]} />
+        <meshStandardMaterial color="#eab308" metalness={0.6} roughness={0.4} />
+        <Html position={[0, 0.2, 0]} center distanceFactor={10}>
+          <div style={{ fontSize: '8px', color: '#eab308', fontFamily: 'monospace', background: 'rgba(15,23,42,0.8)', padding: '2px 4px', borderRadius: '4px' }}>Electrical Cable</div>
+        </Html>
+      </mesh>
+
+      {/* Optical Fiber */}
+      <mesh position={[1, -1.8, -0.8]} rotation={[0, -Math.PI / 4, Math.PI / 2]}>
+        <cylinderGeometry args={[0.05, 0.05, 11, 16]} />
+        <meshStandardMaterial color="#f97316" metalness={0.5} roughness={0.5} />
+        <Html position={[0, 0.2, 0]} center distanceFactor={10}>
+          <div style={{ fontSize: '8px', color: '#f97316', fontFamily: 'monospace', background: 'rgba(15,23,42,0.8)', padding: '2px 4px', borderRadius: '4px' }}>Optical Fiber</div>
+        </Html>
+      </mesh>
+    </group>
+  );
+}
+
 interface FloorProps {
   floorIndex: number;
   isSelected: boolean;
@@ -494,6 +527,8 @@ function BuildingScene({
         color="#10B981"
       />
 
+      <UndergroundDemoPipelines baseY={offsetY - FLOOR_HEIGHT * 0.7} />
+
       <Environment preset="night" />
 
       <OrbitControls
@@ -503,7 +538,7 @@ function BuildingScene({
         enableRotate
         minDistance={4}
         maxDistance={25}
-        maxPolarAngle={Math.PI / 2.1}
+        maxPolarAngle={Math.PI / 1.5}
         autoRotate
         autoRotateSpeed={0.3}
         target={[0, 0, 0]}
