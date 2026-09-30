@@ -19,20 +19,20 @@ if (process.env.FRONTEND_URL) {
   allowedOrigins.push(process.env.FRONTEND_URL);
 }
 
-app.use(cors({ 
-  origin: function(origin, callback) {
+const corsOptions = { 
+  origin: function(origin: any, callback: any) {
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   }
-}));
+};
 
 app.use(express.json());
 
 // API Routes
-app.use('/api', apiRouter);
+app.use('/api', cors(corsOptions), apiRouter);
 
 // Serve static files from the React app (production build)
 const distPath = path.join(__dirname, '../dist');
